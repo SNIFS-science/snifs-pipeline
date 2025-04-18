@@ -1,1 +1,3 @@
-# pipeline-observability
+# SNIFS Pipeline
+
+Details coming soon.
