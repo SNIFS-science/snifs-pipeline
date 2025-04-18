@@ -1,0 +1,16 @@
+docs
+output
+postprocessing
+tuning
+**/.pytest_cache
+.vscode
+.git
+**/__pycache__
+**/.DS_Store
+**/.dockerignore
+*.egg-info
+test
+pytest.ini
+benchmark
+build
+**/*.so

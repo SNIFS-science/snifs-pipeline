@@ -1,0 +1,49 @@
+[project]
+name = "SNIFS-pipeline"
+version = "0.1.0"
+description = "A modern data reduction pipeline for SNIFS"
+readme = "README.md"
+authors = [
+    { name = "Samuel Hinton", email = "samuelreay@gmail.com" },
+]
+requires-python = ">=3.13"
+
+dependencies = [
+    "astropy>=7.0.1",
+    "loguru>=0.7.3",
+    "matplotlib>=3.10.1",
+    "numpy>=2.2.4",
+    "pandera>=0.23.1",
+    "polars>=1.26.0",
+    "prefect>=3.3.1",
+    "pydantic>=2.11.0",
+    "pydantic-settings>=2.8.1",
+]
+
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.3.0",
+    "ruff>=0.5.4,<1",
+    "pre-commit>=3.7.0",
+]
+
+# TODO: Swap over to https://github.com/astral-sh/uv/issues/8779 when ready
+# [build-system]
+# requires = ["hatchling"]
+# build-backend = "hatchling.build"
+
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+extend-select = ["F", "E", "W", "C", "I", "B", "T"]
+
+[tool.ruff.lint.extend-per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.prefect]
+logging.level = "INFO"
+server.ephemeral.enabled = true
