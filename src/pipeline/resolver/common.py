@@ -19,6 +19,7 @@ DATETIME_CONVERSION_EXPR = cs.datetime().dt.cast_time_unit("ms").dt.convert_time
 class FileType(StrEnum):
     SCIENCE = "OBJECT"
     CONTINUUM = "FLAT"
+    RASTER = "RASTER"
     WEATHER = "WEATHER"
     ARC = "ARC"
     RAW_LOGS = "RAW_LOGS"
@@ -125,9 +126,13 @@ def extract_file_details(path: Path, relative_path: Path) -> FileStoreDataFrame:
             values[key] = value
 
     # There is some possibility to confuse high signal to noise continuum files
-    # with low signal to noise raster readouts.
+    # with low signal to noise raster readouts. In the existing quick_preprocess
+    # scripts, this check is done by check to see if the file is less than 16MB in size
+    # I'm not going to use 16MB because thats the rasters are <2MB and full flats
+    # are 16-17MB anyway, so why the cutoff so close? I'll go for the midpoint of 8MB.
     if values.get("TYPE") == FileType.CONTINUUM:
-        pass
-        # Some check here
+        file_size_mb = path.stat().st_size / (1024 * 1024)
+        if file_size_mb < 8:
+            values["type"] = FileType.RASTER
 
     return FileStoreDataFrame(values)
