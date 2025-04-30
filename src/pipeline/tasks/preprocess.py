@@ -1,7 +1,8 @@
+from pathlib import Path
+
 import numpy as np
 
 from pipeline.common.prefect_utils import pipeline_flow, pipeline_task
-from pipeline.config.reduce_channel_exposure import ChannelReduction
 from pipeline.resolver.resolver import Resolver
 from pipeline.tasks.common import load_header, load_image_data
 
@@ -13,19 +14,17 @@ def add_variance(exposure: np.ndarray, variance: np.ndarray) -> np.ndarray:
 
 
 @pipeline_flow()
-def preprocess_exposure(config: ChannelReduction, resovler: Resolver):
+def preprocess_exposure(exposure: Path, resovler: Resolver):
     # TODO: binary offset model comes from somewhere and does something
     # TODO: We neber provide a bias file so this subtraction is useless
-
-    science_file = config.science_file
 
     # Check to see if the noise has already been added
     # This is normally done by checking that POISNOIS, if it exists in the header, is not 1
     # TODO: In general I dislike all these magic header values and ideally would do something a bit more transparent
     # Anyway, if the noise isnt there, then we add poisson noise
-    header = load_header(science_file)
-    exposure = load_image_data(science_file, header=1)
-    variance = load_image_data(science_file, header=2)
+    header = load_header(exposure)
+    exposure = load_image_data(exposure, header=1)
+    variance = load_image_data(exposure, header=2)
 
     # TODO: Dont like magic strings, will pull this into a subconfig.
     if header.get("POISNOIS") != 1:

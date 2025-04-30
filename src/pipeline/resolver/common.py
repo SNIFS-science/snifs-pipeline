@@ -61,6 +61,8 @@ class FileStoreEntry(BaseModel):
     object_dec: str | None
     run_id: str | None
     observation_id: str | None
+    num_extensions: int | None
+    num_data_extensions: int | None
     time_added: dt
     time_creation: dt | None
     time_observation: dt | None
@@ -107,6 +109,9 @@ def extra_details_from_fits(path: Path) -> dict[str, str | int | float | dt]:
                     elif isinstance(value, str):
                         value = dt.strptime(value, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=tz.utc)
                 values[column] = value
+
+        values["num_extensions"] = len(hdul)
+        values["num_data_extensions"] = len([x for x in hdul if x.data is not None])
     return values
 
 
