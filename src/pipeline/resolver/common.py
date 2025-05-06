@@ -25,6 +25,7 @@ class FileType(StrEnum):
     RAW_LOGS = "RAW_LOGS"
     CCD_ON_TIMES = "CCD_ON_TIMES"
     DICHROIC_REFERENCE = "DICHROIC_REFERENCE"
+    BINARY_OFFSET_MODEL = "BINARY_OFFSET_MODEL"
 
 
 class FileStoreModel(DataFrameModel):
