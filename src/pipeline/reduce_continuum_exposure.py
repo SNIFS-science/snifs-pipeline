@@ -8,14 +8,9 @@ from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.resolver.resolver import Resolver
 from pipeline.tasks import (
-    augment_science_file,
-    calibrate_with_flats,
-    correct_dichoric,
     preprocess_exposure,
-    remove_continuum,
 )
 from pipeline.tasks.build_filestore import build_filestore
-from pipeline.tasks.cfht_weather import update_cfht_weather
 
 
 class ContinuumReduction(BaseSettings):
@@ -43,23 +38,22 @@ def reduce_continuum_channel_exposure(config: ContinuumReduction) -> None:
     logger = get_logger()
     logger.info(f"Starting contiuum exposure reduction with settings:\n {config.model_dump_json(indent=2)}")
 
-    # Synchronise with any external data sources which may have changed
-    update_cfht_weather()
+    # Before we get into the processing, we want to update any external data sources we might need
+    # In the future, this would be managed by Prefect automatically scheduling these updates
+    # update_cfht_weather()
 
     # Load in the existing file store and ensure its up to date
     resolver = build_filestore()
-
-    # Ensure that our config is fully specified using the resolver
     config.resolve_missing(resolver)
 
-    augment_science_file()
-    preprocess_exposure(config, resolver)
-    correct_dichoric()
-    remove_continuum()
-    calibrate_with_flats()
+    # augment_science_file()
+    preprocess_exposure(config.continuum_file, resolver)
+    # correct_dichoric()
+    # remove_continuum()
+    # calibrate_with_flats()
 
 
 if __name__ == "__main__":
-    continuum_file = Path(__file__).parents[4] / "data/runs/run_id=25_057_001/continuum_blue.fits"
+    continuum_file = Path(__file__).parents[2] / "data/runs/run_id=25_057_001/continuum_blue.fits"
     config = ContinuumReduction(continuum_file=continuum_file)
     reduce_continuum_channel_exposure(config)

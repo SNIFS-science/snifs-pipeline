@@ -62,5 +62,6 @@ __pypackages__/
 metastore_db
 *.jar
 .data_dump
-data/
+data/processed
+data/filestore.parquet
 output/

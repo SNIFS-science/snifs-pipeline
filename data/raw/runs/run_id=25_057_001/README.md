@@ -1,0 +1,1 @@
+This run should reduce the high S/N continuum into something usable for the star/science/etc exposures.
