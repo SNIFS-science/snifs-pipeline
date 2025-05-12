@@ -88,36 +88,46 @@ class Resolver(BaseModel):
     def get_match(
         self,
         file_type: str | FileType,
-        primary: FileStoreEntry | None,
+        primary: FileStoreEntry | str | Path | None,
     ) -> FileStoreEntry:
         """
         Get a single match for a file type.
         """
         if isinstance(file_type, FileType):
             file_type = file_type.value
+        if isinstance(primary, str):
+            primary = Path(primary)
+        if isinstance(primary, Path):
+            primary = self.get_file_metadata(primary)
         return file_match_registry.get_match(file_type, primary, self.file_store)
 
     def get_match_path(
         self,
         file_type: str | FileType,
-        primary: FileStoreEntry | None = None,
+        primary: FileStoreEntry | str | Path | None = None,
     ) -> Path:
         return self.data_path / self.get_match(file_type, primary).file_path
 
     def get_matches(
         self,
         file_type: str | FileType,
-        primary: FileStoreEntry | None = None,
+        primary: FileStoreEntry | str | Path | None = None,
     ) -> list[FileStoreEntry]:
         """
         Get all matches for a file type.
         """
+        if isinstance(file_type, FileType):
+            file_type = file_type.value
+        if isinstance(primary, str):
+            primary = Path(primary)
+        if isinstance(primary, Path):
+            primary = self.get_file_metadata(primary)
         return file_match_registry.get_matches(file_type, primary, self.file_store)
 
     def get_match_paths(
         self,
         file_type: str | FileType,
-        primary: FileStoreEntry | None = None,
+        primary: FileStoreEntry | str | Path | None = None,
     ) -> list[Path]:
         """
         Get all match paths for a file type.

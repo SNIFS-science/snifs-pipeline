@@ -13,10 +13,10 @@ def add_variance(exposure: np.ndarray, variance: np.ndarray) -> np.ndarray:
     return variance + exposure
 
 
-def preprocess_exposure(path: Path, resovler: Resolver):
+def preprocess_exposure(path: Path, resolver: Resolver):
     # Both R and B channels have one CCD read by two amplifiers.
     # The 'chip' terminology means the amps, not that there are two CCDs
-    bichip = build_bichip_from_fits(path)
+    bichip = build_bichip_from_fits(path, resolver)
     chip = bichip.assemble()  # noqa: F841
 
     # TODO: binary offset model comes from somewhere and does something

@@ -1,12 +1,12 @@
 from datetime import datetime as dt
 from pathlib import Path
+from typing import Self
 
-from pydantic import Field, FilePath
-from pydantic_settings import BaseSettings
+from pydantic import Field, FilePath, model_validator
 
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
-from pipeline.resolver.resolver import Resolver
+from pipeline.preprocess_exposure import PreprocessExposure
 from pipeline.tasks import (
     augment_science_file,
     calibrate_with_flats,
@@ -14,16 +14,11 @@ from pipeline.tasks import (
     preprocess_exposure,
     remove_continuum,
 )
-from pipeline.tasks.build_filestore import build_filestore
 from pipeline.tasks.cfht_weather import update_cfht_weather
 
 
 # TODO: I dont like any of these being FilePaths, but figured we'll start here
-class ChannelReduction(BaseSettings):
-    science_file: FilePath = Field(
-        description="Location of the science file. This is actual observation. Relative to the data path."
-    )
-
+class ChannelReduction(PreprocessExposure):
     arc_file: FilePath = Field(
         default=None,
         description="Location of the arc file(s). For a single exposure, the arc is usually taken "
@@ -51,45 +46,31 @@ class ChannelReduction(BaseSettings):
         "This is needed because the amount of time the instrument has been idle impacts readings.",
     )
 
-    use_cache: bool = Field(default=True, description="Use cached data when possible")
-
-    make_plots: bool = Field(default=True, description="Make plots of the data")
-
-    def resolve_missing(self, resolver: Resolver) -> None:
-        """
-        Resolves the paths for the channel reduction config.
-        This is a bit of a hack, but it works for now.
-        """
-        logger = get_logger()
-        logger.info("Resolving missing paths for channel reduction config")
-        primary = resolver.get_file_metadata(self.science_file)
+    @model_validator(mode="after")
+    def resolve_missing(self) -> Self:
+        assert self.resolver is not None, "Resolver should not be None at this point"
+        primary = self.resolver.get_file_metadata(self.primary_file)
         if self.arc_file is None:
-            self.arc_file = resolver.get_match_path("ARC", primary)
+            self.arc_file = self.resolver.get_match_path("ARC", primary)
         if not self.continuum_files:
-            self.continuum_files = resolver.get_match_paths("FLAT", primary)
+            self.continuum_files = self.resolver.get_match_paths("FLAT", primary)
         if self.weather_file is None:
-            self.weather_file = resolver.get_match_path("WEATHER", primary)
-
-        logger.info(f"Final config:\n {self.model_dump_json(indent=2)}")
+            self.weather_file = self.resolver.get_match_path("WEATHER", primary)
+        return self
 
 
 @pipeline_flow()
 def reduce_star_channel_exposure(config: ChannelReduction) -> None:
     logger = get_logger()
     logger.info(f"Starting channel exposure reduction with settings:\n {config.model_dump_json(indent=2)}")
+    assert config.resolver is not None, "Resolver should not be None at this point"
 
     # Synchronise with any external data sources which may have changed
     update_cfht_weather()
 
-    # Load in the existing file store and ensure its up to date
-    resolver = build_filestore()
-
-    # Ensure that our config is fully specified using the resolver
-    config.resolve_missing(resolver)
-
     # And now we can run the reduction
     augment_science_file()
-    preprocess_exposure(config, resolver)
+    preprocess_exposure(config.primary_file, config.resolver)
     correct_dichoric()
     remove_continuum()
     calibrate_with_flats()
@@ -98,5 +79,5 @@ def reduce_star_channel_exposure(config: ChannelReduction) -> None:
 if __name__ == "__main__":
     # TODO: allow string and relative dir validation
     science_file = Path(__file__).parents[4] / "data/runs/run_id=25_056_084/science_blue.fits"
-    config = ChannelReduction(science_file=science_file)
+    config = ChannelReduction(primary_file=science_file)
     reduce_star_channel_exposure(config)
