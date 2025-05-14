@@ -5,7 +5,7 @@ from pipeline.resolver.registry import file_match_registry
 
 
 @file_match_registry.register(FileType.BINARY_OFFSET_MODEL)
-def find_arc_files(primary_file: FileStoreEntry | None, file_store: FileStoreDataFrame) -> list[FileStoreEntry]:
+def find_bom_files(primary_file: FileStoreEntry | None, file_store: FileStoreDataFrame) -> list[FileStoreEntry]:
     """
     Find the arc file for a given science file.
     """

@@ -47,3 +47,12 @@ extend-select = ["F", "E", "W", "C", "I", "B", "T"]
 [tool.prefect]
 logging.level = "INFO"
 server.ephemeral.enabled = true
+
+[tool.pytest.ini_options]
+addopts = "-v"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning:prefect.*",
+    "ignore::DeprecationWarning:_griffe.*",
+]
+pythonpath = ["src"]

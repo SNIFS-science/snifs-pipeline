@@ -106,7 +106,7 @@ def load_image_data(science_file: Path, hdu_index: int = 0) -> np.ndarray:
         return data
 
 
-def load_all_data_extensions(science_file: Path) -> list[np.ndarray]:
+def load_all_data_extensions(science_file: Path, transpose: bool = False) -> list[np.ndarray]:
     """
     Load all data extensions from a FITS file.
     """
@@ -114,6 +114,11 @@ def load_all_data_extensions(science_file: Path) -> list[np.ndarray]:
     with fits.open(science_file) as hdul:  # type: ignore
         data = [hdu.data for hdu in hdul if isinstance(hdu.data, np.ndarray)]
         logger.debug(f"Loaded {len(data)} data extensions from {science_file}")
+        if transpose:
+            data = [d.T for d in data]
+            logger.debug(f"Transposed data with shapes {[d.shape for d in data]}")
+        else:
+            logger.debug(f"Data shapes: {[d.shape for d in data]}")
         return data
 
 

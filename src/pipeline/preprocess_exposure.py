@@ -37,5 +37,5 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
 
 if __name__ == "__main__":
     continuum_file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_blue.fits"
-    config = PreprocessExposure(primary_file=continuum_file)
+    config = PreprocessExposure(primary_file=continuum_file, use_cache=False)
     preprocess_exposure(config)

@@ -88,7 +88,7 @@ def get_section_range(label: str) -> Section:
 def extract_section(pixels: np.ndarray, label: str) -> np.ndarray:
     """Extract a section from the pixels array based on the label."""
     section = get_section_range(label)
-    return pixels[section.y_min : section.y_max : section.y_dir, section.x_min : section.x_max : section.x_dir]
+    return pixels[section.x_min : section.x_max : section.x_dir, section.y_min : section.y_max : section.y_dir]
 
 
 def split_otcom_chip(pixels: np.ndarray, headers: Headers) -> tuple[list[np.ndarray], list[Headers]]:
@@ -107,8 +107,8 @@ def split_otcom_chip(pixels: np.ndarray, headers: Headers) -> tuple[list[np.ndar
             | {
                 "ORIGINAL_GAIN": headers[f"CCD{i}GAIN"],  # This is set in the hack fits keywords
                 "CCDNAMP": 1,
-                "DATASEC": f"[1:{data.shape[1]},1:{data.shape[0]}]",
-                "BIASSEC": f"[{data.shape[1]} + 1:{data.shape[1] + bias.shape[1]},1:{bias.shape[0]}]",
+                "DATASEC": f"[1:{data.shape[0]},1:{data.shape[1]}]",
+                "BIASSEC": f"[{data.shape[0]} + 1:{data.shape[0] + bias.shape[0]},1:{bias.shape[1]}]",
                 "CCDSEC": headers[f"CCDSEC{i}"],
                 "AMPSEC": headers[f"AMPSEC{i}"],
                 "DETSEC": headers[f"DETSEC{i}"],
@@ -121,7 +121,7 @@ def split_otcom_chip(pixels: np.ndarray, headers: Headers) -> tuple[list[np.ndar
 
 def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
     """Load a BiChip from a FITS file."""
-    data_list = load_all_data_extensions(path)
+    data_list = load_all_data_extensions(path, transpose=True)
     data_headers = load_headers_from_data(path)  # noqa: F841
     primary_headers = load_headers(path)  # noqa: F841
 
@@ -135,7 +135,7 @@ def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
         split_otcom_chip(data_list[0], data_headers[0])  # type: ignore
 
     # Set up the variance, and start with the Poisson noise that'd we'd expect
-    variances = [data.copy() for data in data_list]
+    variances = [data.copy().astype(np.float64) for data in data_list]
     # And handle saturation by inf'ing out the variance and accounting for bleed
     for data, variance, header in zip(data_list, variances, data_headers, strict=True):
         handle_saturation(data, variance, primary_headers.merge(header).get_float("SATURATE", 65535.0))
@@ -144,7 +144,7 @@ def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
     if len(data_list) == 2:
         # Load the binary offset model
         bom_path = resolver.get_match_path(FileType.BINARY_OFFSET_MODEL, path)
-        correct_binary_offset(data_list, bom_path)
+        data_list = correct_binary_offset(data_list, bom_path)
     #
     # TODO: preprocessor.cxx 259
     # TODO: BuildRawBiChip logic
@@ -169,9 +169,12 @@ def handle_saturation(data: np.ndarray, variance: np.ndarray, level: float) -> N
 
     Note that the first axis is the Y axis, and the second axis is the X axis, and
     the bleed which happens (according to image.cxx:593) is in the Y direction, aka
-    across the rows of 1024 size.
+    across the rows of 4096 size.
+
+    Greg agrees with this: There are channel stops between the columns (y-dir with 4096 pixels),
+    so charge will bleed up a column in the y direction.
     """
     saturation_mask = data > level
-    saturation_mask[:-1, :] |= saturation_mask[1:, :]
-    saturation_mask[1:, :] |= saturation_mask[:-1, :]
+    saturation_mask[:, :-1] |= saturation_mask[:, 1:]
+    saturation_mask[:, 1:] |= saturation_mask[:, :-1]
     variance[saturation_mask] = np.inf
