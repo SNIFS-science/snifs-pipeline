@@ -145,7 +145,22 @@ def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
         # Load the binary offset model
         bom_path = resolver.get_match_path(FileType.BINARY_OFFSET_MODEL, path)
         data_list = correct_binary_offset(data_list, bom_path)
-    #
+
+    # The next section is overscan substraction, and its strange. The logic seems to be:
+    # 1. Only for the first chip, see if it has overscan (aka BIASSEC) is set
+    # 2. If it does set a bool flag that fOddEven=True
+    # 3. Now "Correct" every chip (overscan.cxx:479)
+    # 4. Check if the fOddEven is set, double check OEPARAM is not set as that means its already corrected
+    # 5. Otherwise, "SubstractOddEven" (overscan.cxx:372). This is a monster of a function.
+    # 6. Set the header OEPARAM to the two-length list of param coming out from substract odd even
+    # 7. Add overscan variance
+    #    a. check that OVSCNOIS is not set in the header or is 0
+    #    b. extract overscan region, take variance of the whole thing and add it flat to the image variance
+    #    c. set OVSCNOIS to 1
+    # 8. Subtract offset
+    #    a. This calls computeLines, which calls ComputeLinesMean and ImproveLinesMean
+    #    b. then Subtract calls SubstractRamp, and this is also a big ol monster function
+
     # TODO: preprocessor.cxx 259
     # TODO: BuildRawBiChip logic
     # TODO: HackFitsKeywords
