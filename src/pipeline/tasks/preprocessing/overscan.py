@@ -20,9 +20,9 @@ def correct_even_odd_image(image: Image) -> Image:
     # TODO: This part is super confusing to read to. Conceptually I think its just subtract it out
     # TODO: But the indexation is very confusing. I should create a wrapper for plotting
     x_values = np.arange(image.data.shape[1])
-    correction = result.intercept + result.slope * x_values  # type: ignore
+    correction = 0.5 * (result.intercept + result.slope * x_values)  # type: ignore
     # The original code (overscan.cxx:431,436) subtracts the correction if even
-    # and adds it if odd.
+    # and adds it if odd
     image.data[::2, :] -= correction
     image.data[1::2, :] += correction
 
