@@ -1,13 +1,20 @@
-from collections import namedtuple
 from pathlib import Path
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from pipeline.resolver.common import FileType
 from pipeline.resolver.resolver import Resolver
-from pipeline.tasks.common import Headers, load_all_data_extensions, load_headers, load_headers_from_data
+from pipeline.tasks.common import (
+    Headers,
+    Image,
+    extract_section,
+    load_all_data_extensions_with_headers,
+    load_headers,
+)
 from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
+from pipeline.tasks.preprocessing.overscan import correct_even_odd
+from pipeline.tasks.preprocessing.plots import plotted_task
 
 GAINS = {
     "B": [0.773, 0.744],
@@ -18,8 +25,7 @@ GAINS = {
 
 class Chip(BaseModel):
     primary_headers: Headers
-    data: np.ndarray
-    variance: np.ndarray
+    image: Image
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -32,22 +38,19 @@ class ChipMaker:
 
 class BiChip(BaseModel, ChipMaker):
     primary_headers: Headers
-    data1: np.ndarray
-    data2: np.ndarray
-    variance1: np.ndarray
-    variance2: np.ndarray
-    headers1: Headers
-    headers2: Headers
+    images: list[Image] = Field(min_length=2, max_length=2)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @property
     def data(self) -> np.ndarray:
-        return np.hstack((self.data1, self.data2))
+        return np.hstack((self.images[0].data, self.images[1].data))
 
     @property
     def variance(self) -> np.ndarray:
-        return np.hstack((self.variance1, self.variance2))
+        assert len(self.images) == 2, "Variance is only available for two images"
+        assert self.images[0].variance is not None and self.images[1].variance is not None
+        return np.hstack((self.images[0].variance, self.images[1].variance))
 
     def assemble(self) -> Chip:
         """Ensures we have a 2048x4096 exposure image from the raw file.
@@ -61,95 +64,74 @@ class BiChip(BaseModel, ChipMaker):
         Note though that the arrays wont be the exact same shape as the comment above, because there
         are extra pixels because there are extra pixels in the readout in the overscan region.
         """
+        combined_header = Headers.merge_all(*[image.header for image in self.images])
         return Chip(
             primary_headers=self.primary_headers,
-            data=self.data,
-            variance=self.variance,
+            image=Image(data=self.data, header=combined_header, variance=self.variance),
         )
 
 
-# add a named tuple for the section
-Section = namedtuple("Section", ["x_min", "x_max", "x_dir", "y_min", "y_max", "y_dir"])
-
-
-def get_section_range(label: str) -> Section:
-    """There is a header convention in fits files that defines a data range"""
-    x_min, x_max, y_min, y_max = [int(i) for i in label[1:-1].replace(":", ",").split(",")]
-    x_dir, y_dir = 1, 1
-    if x_max < x_min:
-        x_dir = -1
-        x_min, x_max = x_max, x_min
-    if y_max < y_min:
-        y_dir = -1
-        y_min, y_max = y_max, y_min
-    return Section(x_min - 1, x_max, x_dir, y_min - 1, y_max, y_dir)
-
-
-def extract_section(pixels: np.ndarray, label: str) -> np.ndarray:
-    """Extract a section from the pixels array based on the label."""
-    section = get_section_range(label)
-    return pixels[section.x_min : section.x_max : section.x_dir, section.y_min : section.y_max : section.y_dir]
-
-
-def split_otcom_chip(pixels: np.ndarray, headers: Headers) -> tuple[list[np.ndarray], list[Headers]]:
-    data_list = []
-    chip_headers = []
-    num_amps = headers.get_int("CCDNAMP", 2)
+@plotted_task()
+def split_otcom_chip(images: list[Image]) -> list[Image]:
+    assert len(images) == 1, f"Expected one image, got {len(images)}"
+    data = images[0]
+    new_data_headers = []
+    num_amps = data.header.get_int("CCDNAMP", 2)
     assert num_amps == 2, f"Expected 2 amplifiers, got {num_amps}"
     for i in range(num_amps):
-        data = extract_section(pixels, headers.get_str(f"DATASEC{i}"))
-        bias = extract_section(pixels, headers.get_str(f"BIASSEC{i}"))
-        combined = np.hstack((data, bias))
-        data_list.append(combined)
+        data_array = extract_section(data.data, data.header.get_str(f"DATASEC{i}"))
+        bias_array = extract_section(data.data, data.header.get_str(f"BIASSEC{i}"))
+        combined = np.hstack((data_array, bias_array))
 
-        chip_headers.append(
-            headers
-            | {
-                "ORIGINAL_GAIN": headers[f"CCD{i}GAIN"],  # This is set in the hack fits keywords
-                "CCDNAMP": 1,
-                "DATASEC": f"[1:{data.shape[0]},1:{data.shape[1]}]",
-                "BIASSEC": f"[{data.shape[0]} + 1:{data.shape[0] + bias.shape[0]},1:{bias.shape[1]}]",
-                "CCDSEC": headers[f"CCDSEC{i}"],
-                "AMPSEC": headers[f"AMPSEC{i}"],
-                "DETSEC": headers[f"DETSEC{i}"],
-                "CCDBIN": headers[f"CCDBIN{i}"],
-                "CCDTEMP": headers.get_optional_float("CCDTMP", headers.get_optional_float("DETTEMP", default=None)),
-            }
-        )
-    return data_list, chip_headers
+        chip_header = data.header | {
+            "ORIGINAL_GAIN": data.header[f"CCD{i}GAIN"],  # This is set in the hack fits keywords
+            "CCDNAMP": 1,
+            "DATASEC": f"[1:{data.data.shape[0]},1:{data.data.shape[1]}]",
+            "BIASSEC": f"[{data.data.shape[0]} + 1:{data.data.shape[0] + bias_array.shape[0]},1:{bias_array.shape[1]}]",
+            "CCDSEC": data.header[f"CCDSEC{i}"],
+            "AMPSEC": data.header[f"AMPSEC{i}"],
+            "DETSEC": data.header[f"DETSEC{i}"],
+            "CCDBIN": data.header[f"CCDBIN{i}"],
+            "CCDTEMP": data.header.get_optional_float(
+                "CCDTMP", data.header.get_optional_float("DETTEMP", default=None)
+            ),
+        }
+        new_data_headers.append(Image.from_array_and_dict(chip_header, combined, np.zeros_like(combined)))
+
+    return new_data_headers
 
 
 def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
     """Load a BiChip from a FITS file."""
-    data_list = load_all_data_extensions(path, transpose=True)
-    data_headers = load_headers_from_data(path)  # noqa: F841
-    primary_headers = load_headers(path)  # noqa: F841
-
-    # Ensure some default values are set in the header
-    primary_headers.set_default({"SATURATE": 65535})
+    images = load_all_data_extensions_with_headers(path, transpose=True)
+    primary_headers = load_headers(path)
 
     # In the original preprocessing, there was an algorithm for both
     # detcom and a SNFactory variant. We'll just be using the variant.
-    if len(data_list) == 1:
+    if len(images) == 1:
         # One extension means otcom, as it's packaged the two amplifiers together
-        split_otcom_chip(data_list[0], data_headers[0])  # type: ignore
+        split_otcom_chip(images)
 
     # Set up the variance, and start with the Poisson noise that'd we'd expect
-    variances = [data.copy().astype(np.float64) for data in data_list]
+    for image in images:
+        image.variance = image.data.copy().astype(np.float64)
+
     # And handle saturation by inf'ing out the variance and accounting for bleed
-    for data, variance, header in zip(data_list, variances, data_headers, strict=True):
-        handle_saturation(data, variance, primary_headers.merge(header).get_float("SATURATE", 65535.0))
+    images = handle_saturation(images)
 
     # Binary offset model is only derived for 2 chip models.
-    if len(data_list) == 2:
-        # Load the binary offset model
+    if len(images) == 2:
         bom_path = resolver.get_match_path(FileType.BINARY_OFFSET_MODEL, path)
-        data_list = correct_binary_offset(data_list, bom_path)
+        images = correct_binary_offset(images, bom_path)
 
     # The next section is overscan substraction, and its strange. The logic seems to be:
     # 1. Only for the first chip, see if it has overscan (aka BIASSEC) is set
     # 2. If it does set a bool flag that fOddEven=True
     # 3. Now "Correct" every chip (overscan.cxx:479)
+    # Now, every chip I've seen has a BIASSEC, so I feel like this should always be true and thus
+    # we should always be doing the odd even correction. Hopefully I'm not wrong.
+    images = correct_even_odd(images)
+
     # 4. Check if the fOddEven is set, double check OEPARAM is not set as that means its already corrected
     # 5. Otherwise, "SubstractOddEven" (overscan.cxx:372). This is a monster of a function.
     # 6. Set the header OEPARAM to the two-length list of param coming out from substract odd even
@@ -168,10 +150,15 @@ def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
     # TODO: handle saturation
     # TODO: binary offset invocation
     # TODO: overscan subtraction
-    return BiChip(...)  # type: ignore
+    return BiChip(primary_headers=primary_headers, images=images)  # type: ignore
 
 
-def handle_saturation(data: np.ndarray, variance: np.ndarray, level: float) -> None:
+@plotted_task()
+def handle_saturation(images: list[Image]) -> list[Image]:
+    return [handle_saturation_image(image) for image in images]
+
+
+def handle_saturation_image(image: Image) -> Image:
     """Handle saturation in the data
 
     For more details on this, see Emmanuel Gangler's thesis, section 3.3.2, PDF page 56.
@@ -189,7 +176,11 @@ def handle_saturation(data: np.ndarray, variance: np.ndarray, level: float) -> N
     Greg agrees with this: There are channel stops between the columns (y-dir with 4096 pixels),
     so charge will bleed up a column in the y direction.
     """
-    saturation_mask = data > level
+    level = image.header.get_float("SATURATE", 65535.0)
+    new_image = image.copy()
+    assert new_image.variance is not None, "Variance must be set before handling saturation"
+    saturation_mask = new_image.data > level
     saturation_mask[:, :-1] |= saturation_mask[:, 1:]
     saturation_mask[:, 1:] |= saturation_mask[:, :-1]
-    variance[saturation_mask] = np.inf
+    new_image.variance[saturation_mask] = np.inf
+    return new_image

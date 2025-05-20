@@ -18,6 +18,7 @@ dependencies = [
     "prefect>=3.3.1",
     "pydantic>=2.11.0",
     "pydantic-settings>=2.8.1",
+    "scipy>=1.15.3",
 ]
 
 

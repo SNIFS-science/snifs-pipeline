@@ -3,6 +3,9 @@ from pathlib import Path
 
 import numpy as np
 
+from pipeline.tasks.common import Image
+from pipeline.tasks.preprocessing.plots import plotted_task
+
 
 def count_bits(x: np.ndarray) -> np.ndarray:
     """Count the number of bits set in a binary number.
@@ -76,7 +79,8 @@ def get_correction_amplitude(
 
 
 # # https://arxiv.org/pdf/1802.06914
-def correct_binary_offset(data_list: list[np.ndarray], bom_path: Path) -> list[np.ndarray]:
+@plotted_task()
+def correct_binary_offset(images: list[Image], bom_path: Path) -> list[Image]:
     """Corrects the binary offset of the data using the binary offset model.
 
     Note that the input data_list should be a list of two 2D numpy arrays, each
@@ -87,7 +91,7 @@ def correct_binary_offset(data_list: list[np.ndarray], bom_path: Path) -> list[n
     assert bom_path.exists(), f"Binary offset model file {bom_path} does not exist"
     model = json.loads(bom_path.read_text())
     parameters = model["parameters"]
-    assert len(data_list) == 2, f"Binary offset model only supports two chips. You've passed in {len(data_list)}"
+    assert len(images) == 2, f"Binary offset model only supports two chips. You've passed in {len(images)}"
     assert len(parameters) == 2, f"Binary offset model should have two lists of parameters. You have {len(parameters)}"
     for p in parameters:
         assert len(p) == 9, f"Binary offset model should have nine parameters per chip. Yours has {len(p)}"
@@ -99,10 +103,10 @@ def correct_binary_offset(data_list: list[np.ndarray], bom_path: Path) -> list[n
     # variable names. I don't know what they mean, and the original code is not
     # very clear either.
 
-    driver_2 = data_list[0][:, 1:-2]
-    driver_3 = data_list[0][:, :-3]
-    driver_other_2 = data_list[1][:, 1:-2]
-    driver_other_3 = data_list[1][:, :-3]
+    driver_2 = images[0].data[:, 1:-2]
+    driver_3 = images[0].data[:, :-3]
+    driver_other_2 = images[1].data[:, 1:-2]
+    driver_other_3 = images[1].data[:, :-3]
     correction = get_correction_amplitude(driver_2, driver_3, driver_other_3, parameters[0])
     correction_other = get_correction_amplitude(driver_other_2, driver_other_3, driver_3, parameters[1])
 
@@ -111,17 +115,18 @@ def correct_binary_offset(data_list: list[np.ndarray], bom_path: Path) -> list[n
     row_mean = np.mean(correction, axis=1)[:, None]
     row_mean_other = np.mean(correction_other, axis=1)[:, None]
 
-    # Before we set anything, copy the original data to float64
-    data_list = [data.astype(np.float64) for data in data_list]
+    # Before we set anything, copy the original data images and set their data type to float64
+    # This is because the correction is not integer, and we don't want to lose precision
+    images = [image.copy(type_coercion=np.float64) for image in images]
 
     # Initial correction works for all but the first three columns
-    data_list[0][:, 3:] -= correction
-    data_list[1][:, 3:] -= correction_other
+    images[0].data[:, 3:] -= correction
+    images[1].data[:, 3:] -= correction_other
     # The first three columns are corrected with the mean
-    data_list[0][:, :3] -= row_mean
-    data_list[1][:, :3] -= row_mean_other
+    images[0].data[:, :3] -= row_mean
+    images[1].data[:, :3] -= row_mean_other
 
-    return data_list
+    return images
 
 
 if __name__ == "__main__":

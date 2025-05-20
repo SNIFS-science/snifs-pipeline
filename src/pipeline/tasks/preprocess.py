@@ -3,8 +3,10 @@ from pathlib import Path
 import numpy as np
 
 from pipeline.common.prefect_utils import pipeline_task
+from pipeline.config.global_settings import settings
 from pipeline.resolver.resolver import Resolver
 from pipeline.tasks.preprocessing.bichips import build_bichip_from_fits
+from pipeline.tasks.preprocessing.plots import plot_images
 
 
 @pipeline_task()
@@ -41,3 +43,4 @@ def preprocess_exposure(path: Path, resolver: Resolver):
 
     # if we have a flat file: apply the flat
     # TODO: apparently custom flats can be an option and its specifically for R channel hot lines?
+    plot_images(settings.output_path / path.stem)
