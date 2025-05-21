@@ -13,7 +13,7 @@ from pipeline.tasks.common import (
     load_headers,
 )
 from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
-from pipeline.tasks.preprocessing.overscan import correct_even_odd
+from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
 from pipeline.tasks.preprocessing.plots import plotted_task
 
 GAINS = {
@@ -124,13 +124,11 @@ def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
         bom_path = resolver.get_match_path(FileType.BINARY_OFFSET_MODEL, path)
         images = correct_binary_offset(images, bom_path)
 
-    # The next section is overscan substraction, and its strange. The logic seems to be:
-    # 1. Only for the first chip, see if it has overscan (aka BIASSEC) is set
-    # 2. If it does set a bool flag that fOddEven=True
-    # 3. Now "Correct" every chip (overscan.cxx:479)
-    # Now, every chip I've seen has a BIASSEC, so I feel like this should always be true and thus
-    # we should always be doing the odd even correction. Hopefully I'm not wrong.
+    # The odd-even effect is touched on in Emmanual Gangler's thesis, section 3.3.2
+    # which you can find in the docs/pdfs folder in this repository.
     images = correct_even_odd(images)
+    images = add_overscan_variance(images)
+    images = subtract_offset(images)
 
     # 4. Check if the fOddEven is set, double check OEPARAM is not set as that means its already corrected
     # 5. Otherwise, "SubstractOddEven" (overscan.cxx:372). This is a monster of a function.
@@ -160,10 +158,6 @@ def handle_saturation(images: list[Image]) -> list[Image]:
 
 def handle_saturation_image(image: Image) -> Image:
     """Handle saturation in the data
-
-    For more details on this, see Emmanuel Gangler's thesis, section 3.3.2, PDF page 56.
-    You can find the original French and a Google-Translated version in the
-    docs/pdfs folder in this repository.
 
     The process is to look for readings above the saturation level, and then
     set their variance to infinity. Because saturation has a bleed, we also set

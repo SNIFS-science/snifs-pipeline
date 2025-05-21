@@ -1,6 +1,7 @@
 from collections import namedtuple
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Concatenate, ParamSpec
 
 import numpy as np
 from astropy.io import fits
@@ -151,14 +152,31 @@ class Image(BaseModel):
                 image.variance = image.variance.astype(type_coercion)
         return image
 
-    def get_data_section(self, enfore_datasec: bool = True) -> np.ndarray:
+    def get_data_section_limits(self, enforce_datasec: bool = True) -> Section | None:
+        """
+        Get the limits of the data section.
+        """
         data_section = self.header.get_optional_str("DATASEC")
         if data_section is None:
-            if enfore_datasec:
+            if enforce_datasec:
                 raise ValueError("DATASEC is not set in the header")
-            return self.data
+            return None
+        return get_section_range(data_section)
 
-        return extract_section(self.data, data_section)
+    def get_data_section(self, enforce_datasec: bool = True) -> np.ndarray:
+        section = self.get_data_section_limits(enforce_datasec=enforce_datasec)
+        if section is None:
+            return self.data
+        return self.data[section.x_min : section.x_max : section.x_dir, section.y_min : section.y_max : section.y_dir]
+
+    def set_data_section(self, data: np.ndarray, enforce_datasec: bool = True) -> None:
+        data_shape = self.get_data_section(enforce_datasec=enforce_datasec).shape
+        assert data.shape == data_shape, f"Input data shape {data.shape} does not match the DATASEC shape {data_shape}"
+        sec = self.get_data_section_limits(enforce_datasec=enforce_datasec)
+        if sec is None:
+            self.data = data
+        else:
+            self.data[sec.x_min : sec.x_max : sec.x_dir, sec.y_min : sec.y_max : sec.y_dir] = data
 
     def get_bias_section(self) -> np.ndarray:
         bias_section = self.header.get_str("BIASSEC")
@@ -175,6 +193,17 @@ class Image(BaseModel):
         Create a DataHeader from an array and a dictionary.
         """
         return Image(data=data, header=Headers(**header), variance=variance)
+
+
+P = ParamSpec("P")
+
+
+def listify(func: Callable[Concatenate[Image, P], Image]) -> Callable[Concatenate[list[Image], P], list[Image]]:
+    def inner(images: list[Image], *args, **kwargs) -> list[Image]:
+        return [func(image, *args, **kwargs) for image in images]
+
+    inner.__name__ = func.__name__.replace("_image", "")
+    return inner
 
 
 def _stupid_header_to_dict(header: Header) -> Headers:
