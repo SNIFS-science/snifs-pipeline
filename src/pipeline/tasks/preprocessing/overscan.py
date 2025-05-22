@@ -8,11 +8,12 @@ from pipeline.tasks.preprocessing.plots import plotted_task
 
 
 def correct_even_odd_image(image: Image) -> Image:
+    image = image.copy()
     header_key = "OEPARAM"
     logger = get_logger()
     if header_key in image.header:
         logger.info("Image has already had even-odd correction applied.")
-        return image.copy()
+        return image
     # TODO: It would be good to actually test this in case the "S->XFirst()" is a 0 or 1
     # TODO: to make sure we're not applying the odd-even the wrong way around.
     # TODO: this needs to be done on the bias section
