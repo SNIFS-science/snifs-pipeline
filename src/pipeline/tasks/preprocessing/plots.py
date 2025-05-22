@@ -50,6 +50,12 @@ def add_colorbar(label: str, fig: plt.Figure, ax: plt.Axes, im: AxesImage, heigh
     cbar.ax.tick_params(rotation=45, labelsize=6)
 
 
+def add_callout_rectangle(ax: plt.Axes) -> None:  # type: ignore
+    """Add a callout rectangle to the axes."""
+    rect = patches.Rectangle(ZOOM_START, ZOOM_SIZE[0], ZOOM_SIZE[1], linewidth=0.5, edgecolor="r", facecolor="none")
+    ax.add_patch(rect)
+
+
 @pipeline_task()
 def plot_images(output_path: Path) -> None:
     """Plot the images in the data store."""
@@ -103,16 +109,6 @@ def plot_images(output_path: Path) -> None:
                 variance.T, cmap=cmap_data, aspect="equal", origin="lower", vmin=min_c_data, vmax=max_c_data
             )
             add_colorbar(f"Variance {k}", fig, axv, imv)
-
-            # Add callout rectangles
-            dr = patches.Rectangle(
-                ZOOM_START, ZOOM_SIZE[0], ZOOM_SIZE[1], linewidth=0.5, edgecolor="r", facecolor="none"
-            )
-            axd.add_patch(dr)
-            vr = patches.Rectangle(
-                ZOOM_START, ZOOM_SIZE[0], ZOOM_SIZE[1], linewidth=0.5, edgecolor="r", facecolor="none"
-            )
-            axv.add_patch(vr)
 
             imdz = axdz.imshow(
                 extract_zoom(data).T,
@@ -176,14 +172,8 @@ def plot_images(output_path: Path) -> None:
             )
             add_colorbar("Zoomed ΔVar", fig, axvzd, imvdz, height=0.04)
 
-            drd = patches.Rectangle(
-                ZOOM_START, ZOOM_SIZE[0], ZOOM_SIZE[1], linewidth=0.5, edgecolor="r", facecolor="none"
-            )
-            axdd.add_patch(drd)
-            vrd = patches.Rectangle(
-                ZOOM_START, ZOOM_SIZE[0], ZOOM_SIZE[1], linewidth=0.5, edgecolor="r", facecolor="none"
-            )
-            axvd.add_patch(vrd)
+            for ax in (axd, axv, axdd, axvd):
+                add_callout_rectangle(ax)
 
             if k == 0:
                 axd.set_title(key, size=8)

@@ -17,7 +17,7 @@ def correct_even_odd_image(image: Image) -> Image:
     # TODO: It would be good to actually test this in case the "S->XFirst()" is a 0 or 1
     # TODO: to make sure we're not applying the odd-even the wrong way around.
     # TODO: this needs to be done on the bias section
-    data = image.get_bias_section()
+    data = image.get_bias_section().astype(np.float64)
     odd_differences = data[:-1:2, :] - data[1::2, :]
     odd_means = np.mean(odd_differences, axis=0).flatten()  # TODO: check axis. This should be y-length (4096 or so)
 
@@ -26,8 +26,7 @@ def correct_even_odd_image(image: Image) -> Image:
 
     # At this point we have a linear fit to the odd differences in the bias section.
     # TODO: This part is super confusing to read to. Conceptually I think its just subtract it out
-    # TODO: But the indexation is very confusing. I should create a wrapper for plotting
-    x_values = np.arange(image.data.shape[1])
+    x_values = np.arange(image.data.shape[1], dtype=np.float64)
     correction = 0.5 * (result.intercept + result.slope * x_values)  # type: ignore
     # The original code (overscan.cxx:431,436) subtracts the correction if even
     # and adds it if odd
