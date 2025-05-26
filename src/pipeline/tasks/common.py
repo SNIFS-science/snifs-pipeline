@@ -1,4 +1,3 @@
-from collections import namedtuple
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
@@ -7,7 +6,7 @@ from typing import Any, Concatenate
 import numpy as np
 from astropy.io import fits
 from astropy.io.fits import Header
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_task
@@ -119,7 +118,13 @@ class Headers(dict[str, str | bool | int | float | list[str] | list[int] | list[
 
 
 # add a named tuple for the section
-Section = namedtuple("Section", ["x_min", "x_max", "x_dir", "y_min", "y_max", "y_dir"])
+class Section(BaseModel):
+    x_min: int
+    x_max: int
+    x_dir: int = Field(default=1)
+    y_min: int
+    y_max: int
+    y_dir: int = Field(default=1)
 
 
 def get_section_range(label: str) -> Section:
@@ -132,7 +137,14 @@ def get_section_range(label: str) -> Section:
     if y_max < y_min:
         y_dir = -1
         y_min, y_max = y_max, y_min
-    return Section(x_min - 1, x_max, x_dir, y_min - 1, y_max, y_dir)
+    return Section(
+        x_min=x_min - 1,
+        x_max=x_max,
+        x_dir=x_dir,
+        y_min=y_min - 1,
+        y_max=y_max,
+        y_dir=y_dir,
+    )
 
 
 def extract_section(pixels: np.ndarray, label: str) -> np.ndarray:
