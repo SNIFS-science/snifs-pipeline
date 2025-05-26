@@ -3,17 +3,15 @@ from scipy.ndimage import median_filter
 from scipy.stats import linregress
 
 from pipeline.common.log import get_logger
-from pipeline.tasks.common import Image, listify
-from pipeline.tasks.preprocessing.plots import plotted_task
+from pipeline.common.prefect_utils import pipeline_task
+from pipeline.tasks.common import Image, flag_skip, listify
+from pipeline.tasks.preprocessing.plots import plot
 
 
+@flag_skip("OEPARAM")
 def correct_even_odd_image(image: Image) -> Image:
     image = image.copy()
-    header_key = "OEPARAM"
     logger = get_logger()
-    if header_key in image.header:
-        logger.info("Image has already had even-odd correction applied.")
-        return image
     # TODO: It would be good to actually test this in case the "S->XFirst()" is a 0 or 1
     # TODO: to make sure we're not applying the odd-even the wrong way around.
     # TODO: this needs to be done on the bias section
@@ -34,42 +32,31 @@ def correct_even_odd_image(image: Image) -> Image:
     image.data[1::2, :] += correction
 
     # We create the params to put in headers for historical purposes
-    image.header[header_key] = [result.slope, result.intercept]  # type: ignore
+    image.header["OEPARAM"] = [result.slope, result.intercept]  # type: ignore
     logger.info(f"Applied even-odd correction: slope={result.slope:0.3f}, intercept={result.intercept:0.3f} to image.")  # type: ignore
     return image
 
 
-correct_even_odd = plotted_task()(listify(correct_even_odd_image))
+correct_even_odd = plot()(pipeline_task()(listify(correct_even_odd_image)))
 
 
+@flag_skip("OVSCNOIS")
 def add_overscan_variance_image(image: Image) -> Image:
-    header_key = "OVSCNOIS"
     logger = get_logger()
     image = image.copy()
-    # OVSCNOIS indicates that this has been done
-    if header_key in image.header and image.header[header_key]:
-        logger.info("Image has already had overscan variance added.")
-        return image
-
     variance = np.var(image.get_bias_section())
     image.header["RDNOISE"] = np.sqrt(variance)
     image.variance += variance
-    image.header[header_key] = 1
     logger.info(f"Added overscan variance: {variance:0.3f} to image.")
     return image
 
 
-add_overscan_variance = plotted_task()(listify(add_overscan_variance_image))
+add_overscan_variance = plot()(pipeline_task()(listify(add_overscan_variance_image)))
 
 
+@flag_skip("OVSCDONE")
 def subtract_offset_image(image: Image) -> Image:
-    header_key = "OVSCDONE"
-    logger = get_logger()
     image = image.copy()
-    if header_key in image.header and image.header[header_key]:
-        logger.info("Image has already had overscan offset subtracted.")
-        return image
-
     # ComputeLinesMean from overscan.cxx:202 iterates over every Y value
     # in the bias section and sums across X axis to compute the mean
     bias_data = image.get_bias_section()
@@ -132,8 +119,6 @@ def subtract_offset_image(image: Image) -> Image:
     # The variance is just a constant value (apart from at the window boundary technically)
     # and so that means that all the differences used to compute the slope are 0.
 
-    # The final part (overscan.cxx:580) is all fits keyword shenanigans.
-    image.header["OVSCDONE"] = 1
     # There are some header value shenanigans in overscan.cxx:585 that I replicate
     # with minimal understanding.
     if image.header.get_optional_str("OBSTYPE") != "BIAS":  #! TODO: this negation confuses me
@@ -149,4 +134,4 @@ def subtract_offset_image(image: Image) -> Image:
     return image
 
 
-subtract_offset = plotted_task()(listify(subtract_offset_image))
+subtract_offset = plot()(pipeline_task()(listify(subtract_offset_image)))

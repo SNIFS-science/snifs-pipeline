@@ -3,18 +3,20 @@ from pathlib import Path
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
+from pipeline.common.prefect_utils import pipeline_task
 from pipeline.resolver.common import FileType
 from pipeline.resolver.resolver import Resolver
 from pipeline.tasks.common import (
     Headers,
     Image,
     extract_section,
+    listify,
     load_all_data_extensions_with_headers,
     load_headers,
 )
 from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
-from pipeline.tasks.preprocessing.plots import log_image_data, plotted_task
+from pipeline.tasks.preprocessing.plots import log_image_data, plot
 
 GAINS = {
     "B": [0.773, 0.744],
@@ -123,7 +125,8 @@ class BiChip(BaseModel, ChipMaker):
         )
 
 
-@plotted_task()
+@plot()
+@pipeline_task()
 def split_chip(images: list[Image]) -> list[Image]:
     if len(images) == 2:
         # If this is a detcom file and thus has two extensions to start with, great!
@@ -193,11 +196,6 @@ def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
     return BiChip(primary_headers=primary_headers, images=images)  # type: ignore
 
 
-@plotted_task()
-def handle_saturation(images: list[Image]) -> list[Image]:
-    return [handle_saturation_image(image) for image in images]
-
-
 def handle_saturation_image(image: Image) -> Image:
     """Handle saturation in the data
 
@@ -220,3 +218,6 @@ def handle_saturation_image(image: Image) -> Image:
     saturation_mask[:, 1:] |= saturation_mask[:, :-1]
     new_image.variance[saturation_mask] = np.inf
     return new_image
+
+
+handle_saturation = plot()(pipeline_task()(listify(handle_saturation_image)))

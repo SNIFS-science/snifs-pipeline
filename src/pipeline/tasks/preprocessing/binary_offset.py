@@ -3,8 +3,9 @@ from pathlib import Path
 
 import numpy as np
 
+from pipeline.common.prefect_utils import pipeline_task
 from pipeline.tasks.common import Image
-from pipeline.tasks.preprocessing.plots import plotted_task
+from pipeline.tasks.preprocessing.plots import plot
 
 
 def count_bits(x: np.ndarray) -> np.ndarray:
@@ -79,7 +80,8 @@ def get_correction_amplitude(
 
 
 # # https://arxiv.org/pdf/1802.06914
-@plotted_task()
+@plot()
+@pipeline_task()
 def correct_binary_offset(images: list[Image], bom_path: Path) -> list[Image]:
     """Corrects the binary offset of the data using the binary offset model.
 

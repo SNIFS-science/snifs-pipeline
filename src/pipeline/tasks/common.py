@@ -1,7 +1,8 @@
 from collections import namedtuple
 from collections.abc import Callable
+from functools import wraps
 from pathlib import Path
-from typing import Any, Concatenate, ParamSpec
+from typing import Any, Concatenate
 
 import numpy as np
 from astropy.io import fits
@@ -55,6 +56,8 @@ class Headers(dict[str, str | bool | int | float | list[str] | list[int] | list[
             elif value.lower() in ("false", "0", "no"):
                 return False
             raise ValueError(f"Key {key} is not a bool: {value} has type {type(value)}")
+        elif isinstance(value, list):
+            return len(value) > 0
         elif value is None:
             return default
         raise ValueError(f"Key {key} is not a bool: {value} has type {type(value)}")
@@ -245,15 +248,37 @@ class Image(BaseModel):
             return image
 
 
-P = ParamSpec("P")
-
-
-def listify(func: Callable[Concatenate[Image, P], Image]) -> Callable[Concatenate[list[Image], P], list[Image]]:
+def listify[**P](func: Callable[Concatenate[Image, P], Image]) -> Callable[Concatenate[list[Image], P], list[Image]]:
     def inner(images: list[Image], *args, **kwargs) -> list[Image]:
         return [func(image, *args, **kwargs) for image in images]
 
     inner.__name__ = func.__name__.replace("_image", "")
     return inner
+
+
+def flag_skip(key: str):
+    def decorator[**P](func: Callable[P, Image]) -> Callable[P, Image]:
+        # The first argument should be an Image instance from which we look at the header.
+        @wraps(func)
+        def inner(*args: P.args, **kwargs: P.kwargs) -> Image:
+            image: Image = args[0]  # type: ignore
+            assert isinstance(image, Image), f"First argument must be an Image instance, got {type(image)}"
+            flag = image.header.get_optional_bool(key)
+            if flag:
+                logger = get_logger()
+                logger.info(f"Skipping {func.__name__} as the flag {key} is set in the header.")
+                return image.copy()
+
+            result = func(*args, **kwargs)  # type: ignore
+            if not isinstance(result, Image):
+                raise TypeError(f"Function {func.__name__} must return an Image instance, got {type(result)}")
+            if not result.header.get_optional_bool(key, default=False):
+                result.header[key] = True
+            return result
+
+        return inner
+
+    return decorator
 
 
 def _stupid_header_to_dict(header: Header) -> Headers:
@@ -306,7 +331,11 @@ def load_all_data_extensions_with_headers(science_file: Path, transpose: bool = 
     logger = get_logger()
     with fits.open(science_file) as hdul:  # type: ignore
         data = [
-            Image(data=hdu.data, header=_stupid_header_to_dict(hdu.header), variance=np.zeros_like(hdu.data))
+            Image(
+                data=hdu.data,
+                header=_stupid_header_to_dict(hdu.header),
+                variance=np.zeros_like(hdu.data, dtype=np.float64),
+            )
             for hdu in hdul
             if isinstance(hdu.data, np.ndarray)
         ]
@@ -314,6 +343,7 @@ def load_all_data_extensions_with_headers(science_file: Path, transpose: bool = 
         if transpose:
             for d in data:
                 d.data = d.data.T
+                d.variance = d.variance.T
     return data
 
 

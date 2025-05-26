@@ -42,15 +42,13 @@ def ensure_list[T](x: T | list[T]) -> list[T]:
     return [x]
 
 
-def plotted_task(**kwargs):
+def plot():
     def decorate(func: Callable[P, R]) -> Callable[P, R]:
-        task_func = pipeline_task(**kwargs)(func)
-
         @wraps(func)
         def inner(images: Image | list[Image], *args, **kwargs) -> Image | list[Image]:
             if not _DATA_STORE:
                 _DATA_STORE["initial"] = ensure_list(images)
-            result = task_func(images, *args, **kwargs)
+            result = func(images, *args, **kwargs)  # type: ignore
             _DATA_STORE[func.__name__] = ensure_list(result)
             return result
 
