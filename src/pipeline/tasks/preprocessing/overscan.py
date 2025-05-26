@@ -70,11 +70,6 @@ def subtract_offset_image(image: Image) -> Image:
         logger.info("Image has already had overscan offset subtracted.")
         return image
 
-    # There are some header value shenanigans in overscan.cxx:585 that I replicate
-    # with minimal understanding.
-    if image.header.get_optional_str("OBSTYPE") != "BIAS":  #! TODO: this negation confuses me
-        image.header["BIASFRAM"] = 1
-
     # ComputeLinesMean from overscan.cxx:202 iterates over every Y value
     # in the bias section and sums across X axis to compute the mean
     bias_data = image.get_bias_section()
@@ -94,8 +89,6 @@ def subtract_offset_image(image: Image) -> Image:
     # There may be some subtlety in the default of scipy's boundary condition.
     window_size = 5 * 2 + 1  # 5 pixels on either side, plus the pixel itself
     medians = median_filter(mean, size=window_size, mode="reflect")
-    # Save out the median medians to the header for posterity
-    image.header["OVSCMED"] = float(np.median(medians))
 
     # Now, the variance is trickier. The math is computed as if our means
     # are a square distribution, and as the lines are full correlated, the
@@ -138,7 +131,20 @@ def subtract_offset_image(image: Image) -> Image:
 
     # The variance is just a constant value (apart from at the window boundary technically)
     # and so that means that all the differences used to compute the slope are 0.
-    #! TODO: Check in with Greg again bout this.
+
+    # The final part (overscan.cxx:580) is all fits keyword shenanigans.
+    image.header["OVSCDONE"] = 1
+    # There are some header value shenanigans in overscan.cxx:585 that I replicate
+    # with minimal understanding.
+    if image.header.get_optional_str("OBSTYPE") != "BIAS":  #! TODO: this negation confuses me
+        image.header["BIASFRAM"] = 1
+
+    # Save out the median medians to the header for posterity
+    image.header["OVSCMED"] = float(np.median(medians))
+
+    max_overscan = max(np.max(medians), (2 * medians[0]) - medians[1])
+    # ^ Don't ask me why it also compares to double the first difference.
+    image.header["OVSCMAX"] = float(max_overscan)
 
     return image
 

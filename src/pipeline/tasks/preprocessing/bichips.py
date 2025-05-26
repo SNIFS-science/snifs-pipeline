@@ -14,7 +14,7 @@ from pipeline.tasks.common import (
 )
 from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
-from pipeline.tasks.preprocessing.plots import plotted_task
+from pipeline.tasks.preprocessing.plots import log_image_data, plotted_task
 
 GAINS = {
     "B": [0.773, 0.744],
@@ -63,17 +63,76 @@ class BiChip(BaseModel, ChipMaker):
 
         Note though that the arrays wont be the exact same shape as the comment above, because there
         are extra pixels because there are extra pixels in the readout in the overscan region.
+
+        This will also flip the R channel, as per bichip.cxx:283
         """
+
+        # Let's do some basic checks before assembling into a single chip
+        data_secs = {image.header.get_str("DATASEC") for image in self.images}
+        assert len(data_secs) == 1, f"All images must have the same DATASEC, got {data_secs}"
+
+        # Go through and reverse directions as needed
+        datas = [image.get_data_section() * image.header.get_float("GAIN") for image in self.images]
+        variances = [image.get_data_section_variance() * (image.header.get_float("GAIN") ** 2) for image in self.images]
+
+        # Flip x direction if R channel
+        if self.primary_headers.get_str("CHANNEL") == "R":
+            datas = [d[::-1, :] for d in datas]
+            variances = [v[::-1, :] for v in variances]
+
+        # The second amplifier is always flipped in the x direction
+        datas[1] = datas[1][::-1, :]
+        variances[1] = variances[1][::-1, :]
+
+        # Images get concatenated along the X axis (see bichip.cxx:267)
+        compound_data = np.vstack(datas)
+        compound_variance = np.vstack(variances)
+
+        primary_headers = self.primary_headers.copy()
+        for i, image in enumerate(self.images):
+            primary_headers[f"CCD{i}GAIN"] = image.header.get_float("GAIN")
+
+        # So the saturation calculation is more complex
+        saturations: list[float] = [
+            (
+                image.header.get_float("SATURATE")
+                - image.header.get_float("OVSCMAX")
+                - abs(
+                    max(
+                        image.header.get_float_list("OEPARAM")[0],
+                        image.header.get_float_list("OEPARAM")[0]
+                        + image.header.get_float_list("OEPARAM")[1] * image.data.shape[1],
+                    )
+                )
+            )
+            * image.header.get_float("GAIN")
+            * 0.99
+            for image in self.images
+        ]
+        primary_headers["SATURATE"] = saturations
+        for key in ["RDNOISE", "OVSCMED", "GAIN", "AMPSEC", "DETSEC"]:
+            if key in primary_headers:
+                del primary_headers[key]  # These are not needed in the final header
+
         combined_header = Headers.merge_all(*[image.header for image in self.images])
+        final_image = Image(data=compound_data, header=combined_header, variance=compound_variance)
+        log_image_data("bichip.assemble", final_image)
         return Chip(
             primary_headers=self.primary_headers,
-            image=Image(data=self.data, header=combined_header, variance=self.variance),
+            image=final_image,
         )
 
 
 @plotted_task()
-def split_otcom_chip(images: list[Image]) -> list[Image]:
-    assert len(images) == 1, f"Expected one image, got {len(images)}"
+def split_chip(images: list[Image]) -> list[Image]:
+    if len(images) == 2:
+        # If this is a detcom file and thus has two extensions to start with, great!
+        # All we need to do then is standardise some header values and return the images.
+        for i, image in enumerate(images):
+            image.header["GAIN"] = image.header.get_float(f"CCD{i}GAIN")
+            image.header["CCDNAMP"] = 1
+            image.header["SATURATE"] = image.header.get_int("CCD{i}SAT", 65535)
+        return images
     data = images[0]
     new_data_headers = []
     num_amps = data.header.get_int("CCDNAMP", 2)
@@ -84,7 +143,7 @@ def split_otcom_chip(images: list[Image]) -> list[Image]:
         combined = np.hstack((data_array, bias_array))
 
         chip_header = data.header | {
-            "ORIGINAL_GAIN": data.header[f"CCD{i}GAIN"],  # This is set in the hack fits keywords
+            "GAIN": data.header[f"CCD{i}GAIN"],  # This is set in the hack fits keywords
             "CCDNAMP": 1,
             "DATASEC": f"[1:{data.data.shape[0]},1:{data.data.shape[1]}]",
             "BIASSEC": f"[{data.data.shape[0]} + 1:{data.data.shape[0] + bias_array.shape[0]},1:{bias_array.shape[1]}]",
@@ -92,6 +151,7 @@ def split_otcom_chip(images: list[Image]) -> list[Image]:
             "AMPSEC": data.header[f"AMPSEC{i}"],
             "DETSEC": data.header[f"DETSEC{i}"],
             "CCDBIN": data.header[f"CCDBIN{i}"],
+            "SATURATE": data.header.get_int(f"CCD{i}SAT", 65535),
             "CCDTEMP": data.header.get_optional_float(
                 "CCDTMP", data.header.get_optional_float("DETTEMP", default=None)
             ),
@@ -102,19 +162,19 @@ def split_otcom_chip(images: list[Image]) -> list[Image]:
 
 
 def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
-    """Load a BiChip from a FITS file."""
+    """Load a BiChip from a FITS file. Note for conventions used and broken,
+    we're following most of what the older C++ code did. One of those
+    things which may be confusing, is that in a 2D numpy array,
+    this is generally the to as the (columns, rows) ordering. In the
+    case for this code, we have shape = (rows, columns) = (x,y) ordering."""
     images = load_all_data_extensions_with_headers(path, transpose=True)
     primary_headers = load_headers(path)
 
     # In the original preprocessing, there was an algorithm for both
     # detcom and a SNFactory variant. We'll just be using the variant.
-    if len(images) == 1:
-        # One extension means otcom, as it's packaged the two amplifiers together
-        split_otcom_chip(images)
-
-    # Set up the variance, and start with the Poisson noise that'd we'd expect
-    for image in images:
-        image.variance = image.data.copy().astype(np.float64)
+    # Here we want to ensure both detcom and otcome come back looking the same,
+    # which in this case means two images, one from each amplifier.
+    images = split_chip(images)
 
     # And handle saturation by inf'ing out the variance and accounting for bleed
     images = handle_saturation(images)
@@ -130,24 +190,6 @@ def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
     images = add_overscan_variance(images)
     images = subtract_offset(images)
 
-    # 4. Check if the fOddEven is set, double check OEPARAM is not set as that means its already corrected
-    # 5. Otherwise, "SubstractOddEven" (overscan.cxx:372). This is a monster of a function.
-    # 6. Set the header OEPARAM to the two-length list of param coming out from substract odd even
-    # 7. Add overscan variance
-    #    a. check that OVSCNOIS is not set in the header or is 0
-    #    b. extract overscan region, take variance of the whole thing and add it flat to the image variance
-    #    c. set OVSCNOIS to 1
-    # 8. Subtract offset
-    #    a. This calls computeLines, which calls ComputeLinesMean and ImproveLinesMean
-    #    b. then Subtract calls SubstractRamp, and this is also a big ol monster function
-
-    # TODO: preprocessor.cxx 259
-    # TODO: BuildRawBiChip logic
-    # TODO: HackFitsKeywords
-    # TODO: create variance
-    # TODO: handle saturation
-    # TODO: binary offset invocation
-    # TODO: overscan subtraction
     return BiChip(primary_headers=primary_headers, images=images)  # type: ignore
 
 
@@ -170,10 +212,10 @@ def handle_saturation_image(image: Image) -> Image:
     Greg agrees with this: There are channel stops between the columns (y-dir with 4096 pixels),
     so charge will bleed up a column in the y direction.
     """
-    level = image.header.get_float("SATURATE", 65535.0)
+    level = image.header.get_int("SATURATE", 65535)
     new_image = image.copy()
     assert new_image.variance is not None, "Variance must be set before handling saturation"
-    saturation_mask = new_image.data > level
+    saturation_mask = new_image.data >= level
     saturation_mask[:, :-1] |= saturation_mask[:, 1:]
     saturation_mask[:, 1:] |= saturation_mask[:, :-1]
     new_image.variance[saturation_mask] = np.inf

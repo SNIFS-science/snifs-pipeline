@@ -15,6 +15,9 @@ class PreprocessExposure(BaseSettings):
     primary_file: FilePath = Field(description="Location of the continuum exposure file. Relative to the data path.")
     use_cache: bool = Field(default=True, description="Use cached data when possible")
     make_plots: bool = Field(default=True, description="Make plots of the data")
+    bias_image: FilePath | None = Field(
+        default=None, description="Location of the bias image. Relative to the data path."
+    )  # type: ignore
     resolver: Resolver | None = Field(default=None, description="Resolver to use for file paths. Default None.")  # type: ignore
 
     @model_validator(mode="after")
@@ -32,7 +35,7 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     logger = get_logger()
     logger.info(f"Starting preprocessing with settings:\n {config.model_dump_json(indent=2)}")
     assert config.resolver is not None, "Resolver should not be None at this point"
-    preprocess_exposure_fn(config.primary_file, config.resolver)
+    preprocess_exposure_fn(config.primary_file, config.bias_image, config.resolver)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_task
 
 
-class Headers(dict[str, str | bool | int | float]):
+class Headers(dict[str, str | bool | int | float | list[str] | list[int] | list[float]]):
     def get_optional_int(self, key: str, default: int | None = None) -> int | None:
         value = self.get(key)
         if isinstance(value, (int, float)):
@@ -39,10 +39,22 @@ class Headers(dict[str, str | bool | int | float]):
         assert value is not None, f"Key {key} is not not available in the header"
         return value
 
+    def get_float_list(self, key: str) -> list[float]:
+        value = self.get(key)
+        if isinstance(value, list) and all(isinstance(v, (int, float)) for v in value):
+            return [float(v) for v in value]
+        raise ValueError(f"Key {key} is not a list of floats: {value} has type {type(value)}")
+
     def get_optional_bool(self, key: str, default: bool | None = None) -> bool | None:
         value = self.get(key)
-        if isinstance(value, bool):
-            return value
+        if isinstance(value, bool) or (isinstance(value, int) and value in (0, 1)):
+            return bool(value)
+        elif isinstance(value, str):
+            if value.lower() in ("true", "1", "yes"):
+                return True
+            elif value.lower() in ("false", "0", "no"):
+                return False
+            raise ValueError(f"Key {key} is not a bool: {value} has type {type(value)}")
         elif value is None:
             return default
         raise ValueError(f"Key {key} is not a bool: {value} has type {type(value)}")
@@ -169,6 +181,14 @@ class Image(BaseModel):
             return self.data
         return self.data[section.x_min : section.x_max : section.x_dir, section.y_min : section.y_max : section.y_dir]
 
+    def get_data_section_variance(self, enforce_datasec: bool = True) -> np.ndarray:
+        section = self.get_data_section_limits(enforce_datasec=enforce_datasec)
+        if section is None:
+            return self.variance
+        return self.variance[
+            section.x_min : section.x_max : section.x_dir, section.y_min : section.y_max : section.y_dir
+        ]
+
     def set_data_section(self, data: np.ndarray, enforce_datasec: bool = True) -> None:
         data_shape = self.get_data_section(enforce_datasec=enforce_datasec).shape
         assert data.shape == data_shape, f"Input data shape {data.shape} does not match the DATASEC shape {data_shape}"
@@ -185,7 +205,7 @@ class Image(BaseModel):
     @classmethod
     def from_array_and_dict(
         cls,
-        header: dict[str, str | bool | int | float],
+        header: dict[str, str | bool | int | float | list[str] | list[int] | list[float]],
         data: np.ndarray,
         variance: np.ndarray,
     ) -> "Image":
@@ -193,6 +213,36 @@ class Image(BaseModel):
         Create a DataHeader from an array and a dictionary.
         """
         return Image(data=data, header=Headers(**header), variance=variance)
+
+    @classmethod
+    def from_fits_file(
+        cls,
+        fits_file: Path | str,
+        data_index: int = 0,
+        variance_index: int = 1,
+        required_variance: bool = False,
+        transpose: bool = False,
+    ) -> "Image":
+        if isinstance(fits_file, str):
+            fits_file = Path(fits_file)
+        with fits.open(fits_file) as hdul:  # type: ignore
+            has_variance = len(hdul) > variance_index and isinstance(hdul[variance_index].data, np.ndarray)
+            has_data = len(hdul) > data_index and isinstance(hdul[data_index].data, np.ndarray)
+            if not has_data:
+                raise ValueError(f"FITS file {fits_file} does not have a data extension at index {data_index}")
+            data = hdul[data_index].data
+            if required_variance and not has_variance:
+                raise ValueError(f"FITS file {fits_file} does not have a variance extension at index {variance_index}")
+            image = Image(
+                data=data,
+                header=_stupid_header_to_dict(hdul[data_index].header),
+                variance=hdul[variance_index].data if has_variance else np.zeros_like(data),
+            )
+            if transpose:
+                image.data = image.data.T
+                image.variance = image.variance.T
+
+            return image
 
 
 P = ParamSpec("P")
@@ -210,7 +260,6 @@ def _stupid_header_to_dict(header: Header) -> Headers:
     return Headers(**{k: v for k, v in sorted(header.items()) if v is not None})
 
 
-@pipeline_task()
 def load_headers(science_file: Path, hdu_index: int = 0) -> Headers:
     """
     Load the primary header of a FITS file.
