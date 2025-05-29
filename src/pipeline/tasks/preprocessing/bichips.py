@@ -4,8 +4,6 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from pipeline.common.prefect_utils import pipeline_task
-from pipeline.resolver.common import FileType
-from pipeline.resolver.resolver import Resolver
 from pipeline.tasks.common import (
     Headers,
     Image,
@@ -164,7 +162,7 @@ def split_chip(images: list[Image]) -> list[Image]:
     return new_data_headers
 
 
-def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
+def build_bichip_from_fits(path: Path, binary_offset_model_file: Path) -> BiChip:
     """Load a BiChip from a FITS file. Note for conventions used and broken,
     we're following most of what the older C++ code did. One of those
     things which may be confusing, is that in a 2D numpy array,
@@ -184,8 +182,7 @@ def build_bichip_from_fits(path: Path, resolver: Resolver) -> BiChip:
 
     # Binary offset model is only derived for 2 chip models.
     if len(images) == 2:
-        bom_path = resolver.get_match_path(FileType.BINARY_OFFSET_MODEL, path)
-        images = correct_binary_offset(images, bom_path)
+        images = correct_binary_offset(images, binary_offset_model_file)
 
     # The odd-even effect is touched on in Emmanual Gangler's thesis, section 3.3.2
     # which you can find in the docs/pdfs folder in this repository.

@@ -65,3 +65,6 @@ metastore_db
 data/processed
 data/filestore.parquet
 output/
+src/example
+data/raw/misc/type=DARK_IMAGE
+data/raw/misc/type=BIAS_IMAGE

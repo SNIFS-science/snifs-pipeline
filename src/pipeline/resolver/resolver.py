@@ -85,6 +85,9 @@ class Resolver(BaseModel):
         assert len(file_records) == 1, f"Found multiple records for {relative_path}"
         return FileStoreEntry.model_validate(file_records.to_dicts()[0])
 
+    def get_full_path(self, file_path: Path) -> Path:
+        return self.data_path / file_path
+
     def get_match(
         self,
         file_type: str | FileType,

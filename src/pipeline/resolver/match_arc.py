@@ -9,7 +9,7 @@ def find_arc_files(primary_file: FileStoreEntry | None, file_store: FileStoreDat
     """
     Find the arc file for a given science file.
     """
-    assert primary_file is not None, "science_file must be provided. There is no global suitable ARC file."
+    assert primary_file is not None, "primary_file must be provided. There is no global suitable ARC file."
     # Try to match on the run_id
     files = file_store.filter(
         (pl.col("type").eq(FileType.ARC.value))
