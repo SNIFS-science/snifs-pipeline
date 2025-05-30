@@ -40,7 +40,8 @@ LINES_Y: dict[int, str] = {
 def determine_output_path(primary: FileStoreEntry) -> Path:
     run_id = "run_id=" + (primary.run_id or "unknown")
     channel = "channel=" + (primary.channel or "unknown")
-    output_path = settings.output_path / "plots" / run_id / channel
+    obstype = "obstype=" + (primary.type or "unknown")
+    output_path = settings.output_path / "plots" / run_id / obstype / channel
     shutil.rmtree(output_path, ignore_errors=True)  # type: ignore
     output_path.mkdir(parents=True, exist_ok=True)
     return output_path
