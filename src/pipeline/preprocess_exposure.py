@@ -1,12 +1,11 @@
 from pathlib import Path
 
 from pydantic import Field, FilePath
-from pydantic_settings import BaseSettings
 
-from pipeline import settings
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.resolver.common import FileType
+from pipeline.tasks.build_filestore import FlowConfig
 from pipeline.tasks.common import Image
 from pipeline.tasks.preprocessing import (
     DarkModel,
@@ -18,7 +17,7 @@ from pipeline.tasks.preprocessing import (
 )
 
 
-class PreprocessExposure(BaseSettings):
+class PreprocessExposure(FlowConfig):
     primary_file: FilePath = Field(description="Location of the continuum exposure file. Relative to the data path.")
     bias_image_file: FileType.BIAS_IMAGE.Path = Field(default=None)  # type: ignore
     bias_model_file: FileType.BIAS_MODEL.Path = Field(default=None)  # type: ignore
@@ -27,12 +26,16 @@ class PreprocessExposure(BaseSettings):
     binary_offset_model_file: FileType.BINARY_OFFSET_MODEL.Path = Field(default=None)  # type: ignore
     prefer_bias_image_over_model: bool = Field(default=True)
     use_dark_stack_if_possible: bool = Field(default=True)
+    refresh_filestore: bool = Field(default=True)
 
 
 @pipeline_flow()
 def preprocess_exposure(config: PreprocessExposure) -> None:
     logger = get_logger()
-    logger.info(f"Starting preprocessing with settings:\n {config.model_dump_json(indent=2)}\n")
+    primary = config.metadata(config.primary_file)
+
+    logger.info(f"Starting preprocessing with settings:\n{config.model_dump_json(indent=2)}\n")
+    logger.info(f"Primary file:\n{primary.model_dump_json(indent=2)}\n")
 
     # Both R and B channels have one CCD read by two amplifiers.
     # The 'chip' terminology means the amps, not that there are two CCDs
@@ -54,7 +57,7 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
         dark_images = Image.stack_from_fits_file(config.dark_image_file, transpose=True)
     chip.image = subtract_dark(chip.image, dark_model, dark_images, chip.primary_headers)
 
-    plot_images(settings.output_path / config.primary_file.stem)
+    plot_images(primary)
 
 
 if __name__ == "__main__":

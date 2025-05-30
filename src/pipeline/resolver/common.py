@@ -18,10 +18,9 @@ DATETIME_CONVERSION_EXPR = cs.datetime().dt.cast_time_unit("ms").dt.convert_time
 
 
 def resolve_type(value: str | Path | None, info: ValidationInfo, file_type: "FileType") -> Path:
-    from pipeline import settings
     from pipeline.tasks.build_filestore import build_filestore
 
-    resolver = build_filestore(refresh=settings.refresh)
+    resolver = build_filestore(refresh=info.data.get("refresh_filestore", False))
     if isinstance(value, Path):
         return value
     if isinstance(value, str):

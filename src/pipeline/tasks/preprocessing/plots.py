@@ -1,3 +1,4 @@
+import shutil
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
@@ -12,6 +13,7 @@ from matplotlib.image import AxesImage
 from pipeline import settings
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_task
+from pipeline.resolver.common import FileStoreEntry
 from pipeline.tasks.common import Image
 
 _DATA_STORE: dict[str, list[Image]] = {}
@@ -33,6 +35,15 @@ LINES_Y: dict[int, str] = {
     1536: "#0e7490",
     2048: "#fb7185",
 }
+
+
+def determine_output_path(primary: FileStoreEntry) -> Path:
+    run_id = "run_id=" + (primary.run_id or "unknown")
+    channel = "channel=" + (primary.channel or "unknown")
+    output_path = settings.output_path / "plots" / run_id / channel
+    shutil.rmtree(output_path, ignore_errors=True)  # type: ignore
+    output_path.mkdir(parents=True, exist_ok=True)
+    return output_path
 
 
 def ensure_list[T](x: T | list[T]) -> list[T]:
@@ -96,13 +107,14 @@ def add_ticks(ax: plt.Axes, locations: dict[int, str], axis: str = "y", reach: f
 
 
 @pipeline_task()
-def plot_images(output_path: Path) -> None:  # noqa: C901
+def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
     """Plot the images in the data store."""
     logger = get_logger()
     if not settings.plot:
         logger.info("Plotting is disabled. Skipping plot generation.")
         return
-    output_path.mkdir(parents=True, exist_ok=True)
+
+    output_path = determine_output_path(primary)
 
     cmap_data = cmr.torch
     cmap_zoom = cmr.rainforest

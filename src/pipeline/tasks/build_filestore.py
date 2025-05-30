@@ -1,14 +1,16 @@
-from functools import lru_cache
+from functools import cached_property, lru_cache
+from pathlib import Path
 
 import polars as pl
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_task
-from pipeline.resolver.common import FileStoreDataFrame, extract_file_details
+from pipeline.resolver.common import FileStoreDataFrame, FileStoreEntry, extract_file_details
 from pipeline.resolver.resolver import Resolver
 
 
-@lru_cache()
+@lru_cache
 @pipeline_task()
 def build_filestore(refresh: bool = False) -> Resolver:
     resolver = Resolver.create()
@@ -46,6 +48,19 @@ def build_filestore(refresh: bool = False) -> Resolver:
     # Validate the file store exists and can be loaded
     _ = resolver.file_store
     return resolver
+
+
+class FlowConfig(BaseSettings):
+    @cached_property
+    def resolver(self) -> Resolver:
+        from pipeline.tasks.build_filestore import build_filestore
+
+        return build_filestore(refresh=getattr(self, "refresh_filestore", False))
+
+    def metadata(self, path: Path) -> FileStoreEntry:
+        return self.resolver.get_file_metadata(path)
+
+    model_config = SettingsConfigDict(cli_parse_args=True)
 
 
 if __name__ == "__main__":
