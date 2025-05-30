@@ -30,6 +30,11 @@ class Headers(dict[str, str | bool | int | float | list[str] | list[int] | list[
         value = self.get(key)
         if isinstance(value, (int, float)):
             return float(value)
+        elif isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError as err:
+                raise ValueError(f"Key {key} is not a float: {value} has type {type(value)}") from err
         elif value is None:
             return default
         raise ValueError(f"Key {key} is not a float: {value} has type {type(value)}")
@@ -217,6 +222,19 @@ class Image(BaseModel):
         bias_section = self.header.get_str("BIASSEC")
         return extract_section(self.data, bias_section)
 
+    def add(self, image: "Image", scale: float = 1.0) -> "Image":
+        """
+        Add another image to this one, scaling the data by the given scale factor.
+        """
+        if self.data.shape != image.data.shape:
+            raise ValueError(f"Image shapes do not match: {self.data.shape} vs {image.data.shape}")
+        new_data = self.data + scale * image.data
+        new_variance = self.variance + scale**2 * image.variance
+        return Image(data=new_data, header=self.header.copy(), variance=new_variance)
+
+    def subtract(self, image: "Image", scale: float = 1.0) -> "Image":
+        return self.add(image, scale=-scale)
+
     @classmethod
     def from_array_and_dict(
         cls,
@@ -258,6 +276,25 @@ class Image(BaseModel):
                 image.variance = image.variance.T
 
             return image
+
+    @classmethod
+    def stack_from_fits_file(cls, fits_file: Path | str, transpose: bool = False) -> list["Image"]:
+        if isinstance(fits_file, str):
+            fits_file = Path(fits_file)
+        images = []
+        with fits.open(fits_file) as hdul:  # type: ignore
+            for hdu in hdul:
+                if isinstance(hdu.data, np.ndarray):
+                    image = Image(
+                        data=hdu.data,
+                        header=_stupid_header_to_dict(hdu.header),
+                        variance=np.zeros_like(hdu.data, dtype=np.float64),
+                    )
+                    if transpose:
+                        image.data = image.data.T
+                        image.variance = image.variance.T
+                    images.append(image)
+        return images
 
 
 def listify[**P](func: Callable[Concatenate[Image, P], Image]) -> Callable[Concatenate[list[Image], P], list[Image]]:

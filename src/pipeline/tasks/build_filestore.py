@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 import polars as pl
 
 from pipeline.common.log import get_logger
@@ -6,6 +8,7 @@ from pipeline.resolver.common import FileStoreDataFrame, extract_file_details
 from pipeline.resolver.resolver import Resolver
 
 
+@lru_cache()
 @pipeline_task()
 def build_filestore(refresh: bool = False) -> Resolver:
     resolver = Resolver.create()

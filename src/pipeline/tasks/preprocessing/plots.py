@@ -9,9 +9,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.image import AxesImage
 
+from pipeline import settings
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_task
-from pipeline.config.global_settings import settings
 from pipeline.tasks.common import Image
 
 _DATA_STORE: dict[str, list[Image]] = {}

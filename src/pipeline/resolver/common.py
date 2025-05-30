@@ -1,6 +1,7 @@
 from datetime import datetime as dt
 from datetime import timezone as tz
 from enum import StrEnum
+from functools import partial
 from pathlib import Path
 from typing import Annotated
 
@@ -10,10 +11,22 @@ from astropy.io import fits
 from pandera.engines.polars_engine import DateTime
 from pandera.polars import DataFrameModel
 from pandera.typing.polars import DataFrame, Series
-from pydantic import BaseModel
+from pydantic import BaseModel, BeforeValidator, FilePath, ValidationInfo
 
 UTCDatetime = Annotated[DateTime, False, "UTC", "ms"]
 DATETIME_CONVERSION_EXPR = cs.datetime().dt.cast_time_unit("ms").dt.convert_time_zone("UTC")
+
+
+def resolve_type(value: str | Path | None, info: ValidationInfo, file_type: "FileType") -> Path:
+    from pipeline import settings
+    from pipeline.tasks.build_filestore import build_filestore
+
+    resolver = build_filestore(refresh=settings.refresh)
+    if isinstance(value, Path):
+        return value
+    if isinstance(value, str):
+        return Path(value)
+    return resolver.get_match_path(file_type, info.data.get("primary_file"))
 
 
 class FileType(StrEnum):
@@ -30,6 +43,10 @@ class FileType(StrEnum):
     DARK_IMAGE = "DARK_IMAGE"
     BIAS_MODEL = "BIAS_MODEL"
     BIAS_IMAGE = "BIAS_IMAGE"
+
+    @property
+    def Path(self) -> type[FilePath]:
+        return Annotated[FilePath, BeforeValidator(partial(resolve_type, file_type=self))]  # type: ignore
 
 
 class FileStoreModel(DataFrameModel):

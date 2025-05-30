@@ -79,28 +79,16 @@ def subtract_bias_model(image: Image, model: DarkModel, primary_headers: Headers
 
 def subtract_bias_image(image: Image, bias_image: Image) -> Image:
     assert bias_image.header.get_bool("BIASFRAM"), "Bias image must have BIASFRAM set to True"
-    image = image.copy()
-
-    assert bias_image.data.shape == image.data.shape, (
-        f"Bias image shape {bias_image.data.shape} does not match image shape {image.data.shape}"
-    )
-
-    image.data -= bias_image.data
-    image.variance += bias_image.variance
-
-    # TODO: I'm a bit confused about imagesnifs.cxx:368 - Are we supposed to be determining the dark frame?
-    return image
+    return image.subtract(bias_image)
 
 
 @flag_skip("DARKDONE")
 @plot()
 @pipeline_task()
-def subtract_dark(image: Image, reference: Image | DarkModel, primary_headers: Headers) -> Image:
-    if isinstance(reference, DarkModel):
-        return subtract_dark_model(image, reference, primary_headers)
-    elif isinstance(reference, Image):
-        return subtract_dark_image(image, reference, primary_headers)
-    raise ValueError(f"Reference must be either a DarkModel or an Image, got {type(reference)} instead.")
+def subtract_dark(image: Image, model: DarkModel, dark_images: list[Image] | None, primary_headers: Headers) -> Image:
+    if dark_images is None:
+        return subtract_dark_model(image, model, primary_headers)
+    return subtract_dark_stack(image, dark_images, model, primary_headers)
 
 
 def subtract_dark_model(image: Image, model: DarkModel, primary_headers: Headers) -> Image:
@@ -122,19 +110,29 @@ def subtract_dark_model(image: Image, model: DarkModel, primary_headers: Headers
     return image
 
 
-def subtract_dark_image(image: Image, dark_image: Image, primary_headers: Headers) -> Image:
-    assert dark_image.header.get_bool("DARKFRAM"), "Dark image must have DARKFRAM set to True"
+def subtract_dark_stack(image: Image, dark_images: list[Image], model: DarkModel, primary_headers: Headers) -> Image:
+    assert len(dark_images) == 3, "Dark stack must contain exactly 3 images (i0, i1, i2 terms)"
+    for dark_image in dark_images:
+        assert image.data.shape == dark_image.data.shape, (
+            f"Dark image shape {dark_image.data.shape} does not match image shape {image.data.shape}"
+        )
+    assert len(model.sections) == 1, "Dark model should have exactly one section for dark subtraction"
+    section = model.sections[0]
+
     logger = get_logger()
     if not image.header.get_bool("OVSCDONE"):
         logger.warning("Image does not have OVSCDONE set, dark subtraction may not be correct.")
-    assert image.data.shape == dark_image.data.shape, (
-        f"Dark image shape {dark_image.data.shape} does not match image shape {image.data.shape}"
-    )
-    exposure_time = primary_headers.get_float("DARKTIME")
-    dark_time = dark_image.header.get_float("DARKTIME")
 
-    image = image.copy()
-    scale = -exposure_time / dark_time
-    image.data += scale * dark_image.data
-    image.variance += dark_image.variance * (scale**2)
+    dark_time = primary_headers.get_float("DARKTIME")
+    time_on = primary_headers.get_float("TIMEON")
+    temperature = primary_headers.get_float("DETTEMP")
+
+    coefficients = [
+        section.i0 * dark_time,
+        section.i1 * section.dark_time_term(dark_time=dark_time, time_on=time_on),
+        section.i2 * section.temperature_term(temperature) * dark_time,
+    ]
+    for dark_image, coeff in zip(dark_images, coefficients, strict=True):
+        logger.debug(f"Subtracting dark image with coefficient {coeff}")
+        image = image.subtract(dark_image, coeff)
     return image
