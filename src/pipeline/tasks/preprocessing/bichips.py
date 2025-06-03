@@ -7,7 +7,7 @@ from pipeline.common.prefect_utils import pipeline_task
 from pipeline.tasks.common import (
     Headers,
     Image,
-    extract_section,
+    extract_section_from_label,
     listify,
     load_all_data_extensions_with_headers,
     load_headers,
@@ -139,8 +139,8 @@ def split_chip(images: list[Image]) -> list[Image]:
     num_amps = data.header.get_int("CCDNAMP", 2)
     assert num_amps == 2, f"Expected 2 amplifiers, got {num_amps}"
     for i in range(num_amps):
-        data_array = extract_section(data.data, data.header.get_str(f"DATASEC{i}"))
-        bias_array = extract_section(data.data, data.header.get_str(f"BIASSEC{i}"))
+        _, data_array = extract_section_from_label(data.data, data.header.get_str(f"DATASEC{i}"))
+        _, bias_array = extract_section_from_label(data.data, data.header.get_str(f"BIASSEC{i}"))
         combined = np.hstack((data_array, bias_array))
 
         chip_header = data.header | {
@@ -162,6 +162,15 @@ def split_chip(images: list[Image]) -> list[Image]:
     return new_data_headers
 
 
+def override_headers(images: list[Image], primary_headers: Headers) -> list[Image]:
+    result = [image.copy() for image in images]
+    channel = primary_headers.get_str("CHANNEL")
+    for i, image in enumerate(result):
+        image.header["GAIN"] = GAINS[channel][i]
+
+    return result
+
+
 def build_bichip_from_fits(path: Path, binary_offset_model_file: Path) -> BiChip:
     """Load a BiChip from a FITS file. Note for conventions used and broken,
     we're following most of what the older C++ code did. One of those
@@ -176,6 +185,7 @@ def build_bichip_from_fits(path: Path, binary_offset_model_file: Path) -> BiChip
     # Here we want to ensure both detcom and otcome come back looking the same,
     # which in this case means two images, one from each amplifier.
     images = split_chip(images)
+    images = override_headers(images, primary_headers)
 
     # And handle saturation by inf'ing out the variance and accounting for bleed
     images = handle_saturation(images)

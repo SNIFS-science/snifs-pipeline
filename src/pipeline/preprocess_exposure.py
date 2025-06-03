@@ -15,6 +15,7 @@ from pipeline.tasks.preprocessing import (
     subtract_bias,
     subtract_dark,
 )
+from pipeline.tasks.preprocessing.cosmetics import handle_cosmetics
 from pipeline.tasks.preprocessing.plots import plot
 
 
@@ -58,12 +59,18 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
         dark_images = Image.stack_from_fits_file(config.dark_image_file, transpose=True)
     chip.image = subtract_dark(chip.image, dark_model, dark_images, chip.primary_headers)
 
+    chip.image = handle_cosmetics(chip.image, chip.primary_headers)
+
     # This nasty little code loads in the preprocessed fits file Daniel sent me, so we can compare the results
     @plot()
     def debug_comparison(image: Image) -> Image:
+        import numpy as np
+
         # 005 and 006 are R and B continuum
         # 011 are the arcs
-        return Image.from_fits_file(Path(__file__).parents[2] / ".data_dump/P25_057_001_006_07_B.fits", transpose=True)
+        dan = Image.from_fits_file(Path(__file__).parents[2] / ".data_dump/P25_057_001_006_07_B.fits", transpose=True)
+        dan.variance[dan.variance > 1e10] = np.inf
+        return dan
 
     debug_comparison(chip.image)
     plot_images(primary)

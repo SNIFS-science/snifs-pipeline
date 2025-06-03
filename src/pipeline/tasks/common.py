@@ -152,9 +152,13 @@ def get_section_range(label: str) -> Section:
     )
 
 
-def extract_section(pixels: np.ndarray, label: str) -> np.ndarray:
+def extract_section_from_label(pixels: np.ndarray, label: str) -> np.ndarray:
     """Extract a section from the pixels array based on the label."""
     section = get_section_range(label)
+    return extract_section(pixels, section)
+
+
+def extract_section(pixels: np.ndarray, section: Section) -> np.ndarray:
     return pixels[section.x_min : section.x_max : section.x_dir, section.y_min : section.y_max : section.y_dir]
 
 
@@ -218,9 +222,22 @@ class Image(BaseModel):
         else:
             self.data[sec.x_min : sec.x_max : sec.x_dir, sec.y_min : sec.y_max : sec.y_dir] = data
 
-    def get_bias_section(self) -> np.ndarray:
-        bias_section = self.header.get_str("BIASSEC")
-        return extract_section(self.data, bias_section)
+    def mask_bad_section(self, sec: Section) -> None:
+        self.variance[sec.x_min : sec.x_max : sec.x_dir, sec.y_min : sec.y_max : sec.y_dir] = np.inf
+
+    def get_bias_section(self) -> tuple[Section, np.ndarray, np.ndarray]:
+        bias_section_str = self.header.get_str("BIASSEC")
+        bias_section = get_section_range(bias_section_str)
+        bias_data = extract_section(self.data, bias_section)
+        bias_variance = extract_section(self.variance, bias_section)
+        return bias_section, bias_data, bias_variance
+
+    def get_ccd_section(self) -> tuple[Section, np.ndarray, np.ndarray]:
+        ccd_section_str = self.header.get_str("CCDSEC")
+        ccd_section = get_section_range(ccd_section_str)
+        ccd_data = extract_section(self.data, ccd_section)
+        ccd_variance = extract_section(self.variance, ccd_section)
+        return ccd_section, ccd_data, ccd_variance
 
     def add(self, image: "Image", scale: float = 1.0) -> "Image":
         """

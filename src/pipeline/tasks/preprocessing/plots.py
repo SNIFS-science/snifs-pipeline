@@ -9,6 +9,7 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.image import AxesImage
+from matplotlib.ticker import MaxNLocator
 
 from pipeline import settings
 from pipeline.common.log import get_logger
@@ -142,8 +143,8 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
         fig, axes = plt.subplots(
             4,
             num_cols,
-            figsize=(num_cols * 1.5 + 4, 14),
-            gridspec_kw={"hspace": 0.2, "wspace": 0.1},
+            figsize=(num_cols * 1.5 + 5, 14),
+            gridspec_kw={"hspace": 0.2, "wspace": 0.2},
             height_ratios=[aspect_ratio, 1, 1, 1],
         )
         for k, image in enumerate(images):
@@ -253,6 +254,8 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
                 ax.set_yticks([])
             for ax in (axxdl, axxvl, axxddl, axxvdl, axydl, axyvl, axyddl, axyvdl):
                 ax.set_yticks([])
+                ax.yaxis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=3))
+                ax.tick_params(axis="y", labelsize=6, labelrotation=90)
                 ax.tick_params(axis="both", labelsize=6)
                 ax.set_xmargin(0)
         output_location = output_path / f"{i}_{key}.png"

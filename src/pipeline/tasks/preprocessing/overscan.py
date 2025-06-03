@@ -15,7 +15,8 @@ def correct_even_odd_image(image: Image) -> Image:
     # TODO: It would be good to actually test this in case the "S->XFirst()" is a 0 or 1
     # TODO: to make sure we're not applying the odd-even the wrong way around.
     # TODO: this needs to be done on the bias section
-    data = image.get_bias_section().astype(np.float64)
+    _, data, _ = image.get_bias_section()
+    data = data.astype(np.float64)
     odd_differences = data[:-1:2, :] - data[1::2, :]
     odd_means = np.mean(odd_differences, axis=0).flatten()  # TODO: check axis. This should be y-length (4096 or so)
 
@@ -44,7 +45,8 @@ correct_even_odd = plot()(pipeline_task()(listify(correct_even_odd_image)))
 def add_overscan_variance_image(image: Image) -> Image:
     logger = get_logger()
     image = image.copy()
-    variance = np.var(image.get_bias_section())
+    _, data, _ = image.get_bias_section()
+    variance = np.var(data)
     image.header["RDNOISE"] = np.sqrt(variance)
     image.variance += variance
     logger.info(f"Added overscan variance: {variance:0.3f} to image.")
@@ -59,7 +61,7 @@ def subtract_offset_image(image: Image) -> Image:
     image = image.copy()
     # ComputeLinesMean from overscan.cxx:202 iterates over every Y value
     # in the bias section and sums across X axis to compute the mean
-    bias_data = image.get_bias_section()
+    _, bias_data, _ = image.get_bias_section()
     mean = np.mean(bias_data, axis=0)
 
     # To compute the variance, the RMS is loaded from the RDNOISE header value
