@@ -124,12 +124,10 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
     # One column for data, one for variance
 
     all_data = np.concatenate(
-        [images[0].data.flatten() for images in _DATA_STORE.values()]
-        + [images[0].variance.flatten() for images in _DATA_STORE.values()]
+        [im.data.astype(np.float64).flatten() for images in _DATA_STORE.values() for im in images]
     )
     all_data_zooms = np.concatenate(
-        [extract_zoom(images[0].data).flatten() for images in _DATA_STORE.values()]
-        + [extract_zoom(images[0].variance).flatten() for images in _DATA_STORE.values()]
+        [extract_zoom(im.data).astype(np.float64).flatten() for images in _DATA_STORE.values() for im in images]
     )
 
     min_c_data, max_c_data = np.percentile(all_data, [1, 99])

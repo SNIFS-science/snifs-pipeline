@@ -47,7 +47,6 @@ def debug_comparison(image: Image) -> Image:
 def preprocess_exposure(config: PreprocessExposure) -> None:
     logger = get_logger()
     primary = config.metadata(config.primary_file)
-
     logger.info(f"Starting preprocessing with settings:\n{config.model_dump_json(indent=2)}\n")
     logger.info(f"Primary file:\n{primary.model_dump_json(indent=2)}\n")
 
