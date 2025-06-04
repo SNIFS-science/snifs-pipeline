@@ -31,6 +31,18 @@ class PreprocessExposure(FlowConfig):
     refresh_filestore: bool = Field(default=True)
 
 
+# This nasty little code loads in the preprocessed fits file Daniel sent me, so we can compare the results
+@plot()
+def debug_comparison(image: Image) -> Image:
+    import numpy as np
+
+    # 005 and 006 are R and B continuum
+    # 011 are the arcs
+    dan = Image.from_fits_file(Path(__file__).parents[2] / ".data_dump/P25_057_001_005_07_R.fits", transpose=True)
+    dan.variance[dan.variance > 1e10] = np.inf
+    return dan
+
+
 @pipeline_flow()
 def preprocess_exposure(config: PreprocessExposure) -> None:
     logger = get_logger()
@@ -61,22 +73,11 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
 
     chip.image = handle_cosmetics(chip.image, chip.primary_headers)
 
-    # This nasty little code loads in the preprocessed fits file Daniel sent me, so we can compare the results
-    @plot()
-    def debug_comparison(image: Image) -> Image:
-        import numpy as np
-
-        # 005 and 006 are R and B continuum
-        # 011 are the arcs
-        dan = Image.from_fits_file(Path(__file__).parents[2] / ".data_dump/P25_057_001_006_07_B.fits", transpose=True)
-        dan.variance[dan.variance > 1e10] = np.inf
-        return dan
-
     debug_comparison(chip.image)
     plot_images(primary)
 
 
 if __name__ == "__main__":
-    continuum_file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_blue.fits"
+    continuum_file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_red.fits"
     config = PreprocessExposure(primary_file=continuum_file)
     preprocess_exposure(config)

@@ -139,25 +139,29 @@ def split_chip(images: list[Image]) -> list[Image]:
     num_amps = data.header.get_int("CCDNAMP", 2)
     assert num_amps == 2, f"Expected 2 amplifiers, got {num_amps}"
     for i in range(num_amps):
-        _, data_array = extract_section_from_label(data.data, data.header.get_str(f"DATASEC{i}"))
-        _, bias_array = extract_section_from_label(data.data, data.header.get_str(f"BIASSEC{i}"))
-        combined = np.hstack((data_array, bias_array))
+        data_array = extract_section_from_label(data.data, data.header.get_str(f"DATASEC{i}"))
+        bias_array = extract_section_from_label(data.data, data.header.get_str(f"BIASSEC{i}"))
+        combined = np.vstack((data_array, bias_array))
 
         chip_header = data.header | {
             "GAIN": data.header[f"CCD{i}GAIN"],  # This is set in the hack fits keywords
             "CCDNAMP": 1,
-            "DATASEC": f"[1:{data.data.shape[0]},1:{data.data.shape[1]}]",
-            "BIASSEC": f"[{data.data.shape[0]} + 1:{data.data.shape[0] + bias_array.shape[0]},1:{bias_array.shape[1]}]",
+            "DATASEC": f"[1:{data_array.shape[0]},1:{data_array.shape[1]}]",
+            "BIASSEC": (
+                f"[{data_array.shape[0] + 1}:{data_array.shape[0] + bias_array.shape[0]},1:{bias_array.shape[1]}]"
+            ),
             "CCDSEC": data.header[f"CCDSEC{i}"],
             "AMPSEC": data.header[f"AMPSEC{i}"],
             "DETSEC": data.header[f"DETSEC{i}"],
-            "CCDBIN": data.header[f"CCDBIN{i}"],
+            "CCDBIN": data.header[f"CCDBIN{i + 1}"],
             "SATURATE": data.header.get_int(f"CCD{i}SAT", 65535),
             "CCDTEMP": data.header.get_optional_float(
                 "CCDTMP", data.header.get_optional_float("DETTEMP", default=None)
             ),
         }
-        new_data_headers.append(Image.from_array_and_dict(chip_header, combined, np.zeros_like(combined)))
+        new_data_headers.append(
+            Image.from_array_and_dict(chip_header, combined, np.zeros_like(combined, dtype=np.float64))
+        )
 
     return new_data_headers
 
@@ -182,7 +186,7 @@ def build_bichip_from_fits(path: Path, binary_offset_model_file: Path) -> BiChip
 
     # In the original preprocessing, there was an algorithm for both
     # detcom and a SNFactory variant. We'll just be using the variant.
-    # Here we want to ensure both detcom and otcome come back looking the same,
+    # Here we want to ensure both detcom and otcom come back looking the same,
     # which in this case means two images, one from each amplifier.
     images = split_chip(images)
     images = override_headers(images, primary_headers)

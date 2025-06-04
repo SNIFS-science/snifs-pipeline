@@ -131,6 +131,28 @@ class Section(BaseModel):
     y_max: int
     y_dir: int = Field(default=1)
 
+    def __sub__(self, other: "Section") -> "Section":
+        """Subtract another section from this one."""
+        return Section(
+            x_min=self.x_min - other.x_min,
+            x_max=self.x_max - other.x_max,
+            x_dir=self.x_dir * other.x_dir,
+            y_min=self.y_min - other.y_min,
+            y_max=self.y_max - other.y_max,
+            y_dir=self.y_dir * other.y_dir,
+        )
+
+    def __add__(self, other: "Section") -> "Section":
+        """Add another section to this one."""
+        return Section(
+            x_min=self.x_min + other.x_min,
+            x_max=self.x_max + other.x_max,
+            x_dir=self.x_dir * other.x_dir,
+            y_min=self.y_min + other.y_min,
+            y_max=self.y_max + other.y_max,
+            y_dir=self.y_dir * other.y_dir,
+        )
+
 
 def get_section_range(label: str) -> Section:
     """There is a header convention in fits files that defines a data range"""
@@ -188,6 +210,7 @@ class Image(BaseModel):
                 image.variance = image.variance.astype(type_coercion)
         return image
 
+    # TODO: standardise sections and how they interact
     def get_data_section_limits(self, enforce_datasec: bool = True) -> Section | None:
         """
         Get the limits of the data section.
@@ -225,26 +248,34 @@ class Image(BaseModel):
     def mask_bad_section(self, sec: Section) -> None:
         self.variance[sec.x_min : sec.x_max : sec.x_dir, sec.y_min : sec.y_max : sec.y_dir] = np.inf
 
+    def get_section(self, section: Section) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Get a section of the data and variance.
+        """
+        data_section = extract_section(self.data, section)
+        variance_section = extract_section(self.variance, section)
+        return data_section, variance_section
+
     def get_bias_section(self) -> tuple[Section, np.ndarray, np.ndarray]:
         bias_section_str = self.header.get_str("BIASSEC")
         bias_section = get_section_range(bias_section_str)
-        bias_data = extract_section(self.data, bias_section)
-        bias_variance = extract_section(self.variance, bias_section)
-        return bias_section, bias_data, bias_variance
+        data, var = self.get_section(bias_section)
+        return bias_section, data, var
 
     def get_ccd_section(self) -> tuple[Section, np.ndarray, np.ndarray]:
         ccd_section_str = self.header.get_str("CCDSEC")
         ccd_section = get_section_range(ccd_section_str)
-        ccd_data = extract_section(self.data, ccd_section)
-        ccd_variance = extract_section(self.variance, ccd_section)
-        return ccd_section, ccd_data, ccd_variance
+        data, var = self.get_section(ccd_section)
+        return ccd_section, data, var
 
     def add(self, image: "Image", scale: float = 1.0) -> "Image":
         """
         Add another image to this one, scaling the data by the given scale factor.
         """
+
         if self.data.shape != image.data.shape:
-            raise ValueError(f"Image shapes do not match: {self.data.shape} vs {image.data.shape}")
+            logger = get_logger()
+            logger.warning(f"Image shapes do not match: {self.data.shape} vs {image.data.shape}")
         new_data = self.data + scale * image.data
         new_variance = self.variance + scale**2 * image.variance
         return Image(data=new_data, header=self.header.copy(), variance=new_variance)
