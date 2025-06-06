@@ -15,7 +15,7 @@ from pipeline import settings
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_task
 from pipeline.resolver.common import FileStoreEntry
-from pipeline.tasks.common import Image
+from pipeline.tasks.common import Image, Section, get_section_range
 
 _DATA_STORE: dict[str, list[Image]] = {}
 
@@ -85,7 +85,7 @@ def extract_zoom(data: np.ndarray) -> np.ndarray:
 
 
 def add_colorbar(label: str, fig: plt.Figure, ax: plt.Axes, im: AxesImage, height: float = 0.02) -> None:  # type: ignore
-    cbax = ax.inset_axes([0, 0, 1.0, height], transform=ax.transAxes)  # type: ignore
+    cbax = ax.inset_axes([0, -height, 1.0, height], transform=ax.transAxes)  # type: ignore
     cbar = fig.colorbar(im, cax=cbax, orientation="horizontal", format="%1g")
     cbar.set_label(label, size=8)
     cbar.ax.tick_params(rotation=45, labelsize=6)
@@ -94,6 +94,18 @@ def add_colorbar(label: str, fig: plt.Figure, ax: plt.Axes, im: AxesImage, heigh
 def add_callout_rectangle(ax: plt.Axes) -> None:  # type: ignore
     """Add a callout rectangle to the axes."""
     rect = patches.Rectangle(ZOOM_START, ZOOM_SIZE[0], ZOOM_SIZE[1], linewidth=0.5, edgecolor="r", facecolor="none")
+    ax.add_patch(rect)
+
+
+def add_section_rectangle(ax: plt.Axes, section: Section, **kwargs) -> None:  # type: ignore
+    rect = patches.Rectangle(
+        (section.x_min, section.y_min),
+        section.x_max - section.x_min,
+        section.y_max - section.y_min,
+        facecolor="none",
+        linewidth=0.5,
+        **kwargs,
+    )
     ax.add_patch(rect)
 
 
@@ -110,6 +122,8 @@ def add_ticks(ax: plt.Axes, locations: dict[int, str], axis: str = "y", reach: f
 
 @pipeline_task()
 def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
+    # TODO: full image run id, type, channel on image itself
+    # TODO: add a dotted fun box around the biassec if it exists
     """Plot the images in the data store."""
     logger = get_logger()
     if not settings.plot:
@@ -223,6 +237,10 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
 
             for ax in (axd, axv, axdd, axvd):
                 add_callout_rectangle(ax)
+                if "BIASSEC" in image.header:
+                    # TODO: Make this class constructor
+                    bias_section = get_section_range(image.header.get_str("BIASSEC"))
+                    add_section_rectangle(ax, bias_section, edgecolor="#38bdf8", linestyle=":")
 
             # Now we add some line plots for better readability
             kwargs = {"lw": 0.5}
@@ -258,7 +276,7 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
                 ax.set_xmargin(0)
         output_location = output_path / f"{i}_{key}.png"
         logger.info(f"Saving plot to {output_location}")
-        fig.savefig(output_location, dpi=300, bbox_inches="tight")
+        fig.savefig(output_location, dpi=600, bbox_inches="tight")
         plt.close(fig)
 
         prior_images = images

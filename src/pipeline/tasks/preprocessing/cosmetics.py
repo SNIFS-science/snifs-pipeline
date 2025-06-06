@@ -93,10 +93,8 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
         # 1st, the quick-clocked part. That is, the beginning of the line = high y as it is flipped
         # SAM: So this is applying to y values LARGER than y_end, not the y_beginning -> y_end range
         k_last, k_height = 4087, 41
-        ground_data, _ = image.get_section(
-            Section(x_min=ix + 2 - 4, x_max=ix + 2 + 4, y_min=k_last - k_height, y_max=k_last)
-        )
-        line_data, _ = image.get_section(Section(x_min=ix + 2, x_max=ix + 2, y_min=k_last - k_height, y_max=k_last))
+        ground_data, _ = image.get_section(Section(x_min=ix - 4, x_max=ix + 4, y_min=k_last - k_height, y_max=k_last))
+        line_data, _ = image.get_section(Section(x_min=ix, x_max=ix, y_min=k_last - k_height, y_max=k_last))
         correction = np.median(ground_data) - np.median(line_data)
         # The correction actually goes from y_end to the end of the data, not y_beginning to y_end
         ccd_data[ix, y_end + 1 :] += correction

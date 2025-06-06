@@ -7,7 +7,6 @@ from pipeline.common.prefect_utils import pipeline_task
 from pipeline.tasks.common import (
     Headers,
     Image,
-    extract_section_from_label,
     listify,
     load_all_data_extensions_with_headers,
     load_headers,
@@ -75,10 +74,14 @@ class BiChip(BaseModel, ChipMaker):
         datas = [image.get_data_section() * image.header.get_float("GAIN") for image in self.images]
         variances = [image.get_data_section_variance() * (image.header.get_float("GAIN") ** 2) for image in self.images]
 
-        # Flip x direction if R channel
+        # If you're in the R channel, chip0 is on the right and chip1 is on the left
         if self.primary_headers.get_str("CHANNEL") == "R":
-            datas = [d[::-1, :] for d in datas]
-            variances = [v[::-1, :] for v in variances]
+            datas = datas[::-1]
+            variances = variances[::-1]
+
+            # For R channel, the first amplifier needs to be flipped in the X direction
+            datas[0] = datas[0][::-1, :]
+            variances[0] = variances[0][::-1, :]
 
         # The second amplifier is always flipped in the x direction
         datas[1] = datas[1][::-1, :]
@@ -110,11 +113,16 @@ class BiChip(BaseModel, ChipMaker):
             for image in self.images
         ]
         primary_headers["SATURATE"] = saturations
-        for key in ["RDNOISE", "OVSCMED", "GAIN", "AMPSEC", "DETSEC"]:
+        for key in ["RDNOISE", "OVSCMED", "GAIN", "AMPSEC", "DETSEC", "BIASSEC"]:
             if key in primary_headers:
                 del primary_headers[key]  # These are not needed in the final header
 
         combined_header = Headers.merge_all(*[image.header for image in self.images])
+        # Ensure certain keys are not in the header
+        for key in ["BIASSEC"]:
+            if key in combined_header:
+                del combined_header[key]
+
         final_image = Image(data=compound_data, header=combined_header, variance=compound_variance)
         log_image_data("bichip.assemble", final_image)
         return Chip(
@@ -134,29 +142,43 @@ def split_chip(images: list[Image]) -> list[Image]:
             image.header["CCDNAMP"] = 1
             image.header["SATURATE"] = image.header.get_int("CCD{i}SAT", 65535)
         return images
-    data = images[0]
+    image = images[0]
     new_data_headers = []
-    num_amps = data.header.get_int("CCDNAMP", 2)
+    num_amps = image.header.get_int("CCDNAMP", 2)
     assert num_amps == 2, f"Expected 2 amplifiers, got {num_amps}"
+    full_data = image.get_data_section()  # TODO: standardise this
+    n_data = full_data.shape[0] // num_amps
+    _, full_bias, _ = image.get_bias_section()
+    n_bias = full_bias.shape[0] // num_amps
     for i in range(num_amps):
-        data_array = extract_section_from_label(data.data, data.header.get_str(f"DATASEC{i}"))
-        bias_array = extract_section_from_label(data.data, data.header.get_str(f"BIASSEC{i}"))
+        # data_array = extract_section_from_label(data.data, data.header.get_str(f"DATASEC{i}"))
+        # bias_array = extract_section_from_label(data.data, data.header.get_str(f"BIASSEC{i}"))
+        # Ha - psyche! You can't use the DATASEC and BIASSEC index keywords, they're wrong!
+        # Instead just cut the data and bias up!
+        data_array = full_data[i * n_data : (i + 1) * n_data, :]
+        bias_array = full_bias[i * n_bias : (i + 1) * n_bias, :]
+        # if i == 1:
+        # According to preprocessor.cxx:217,222, the first amp is in the normal direction
+        # But the second amp is flipped in the Y direction.
+        data_array = data_array[:, ::-1]
+        bias_array = bias_array[:, ::-1]
+
         combined = np.vstack((data_array, bias_array))
 
-        chip_header = data.header | {
-            "GAIN": data.header[f"CCD{i}GAIN"],  # This is set in the hack fits keywords
+        chip_header = image.header | {
+            "GAIN": image.header[f"CCD{i}GAIN"],  # This is set in the hack fits keywords
             "CCDNAMP": 1,
             "DATASEC": f"[1:{data_array.shape[0]},1:{data_array.shape[1]}]",
             "BIASSEC": (
                 f"[{data_array.shape[0] + 1}:{data_array.shape[0] + bias_array.shape[0]},1:{bias_array.shape[1]}]"
             ),
-            "CCDSEC": data.header[f"CCDSEC{i}"],
-            "AMPSEC": data.header[f"AMPSEC{i}"],
-            "DETSEC": data.header[f"DETSEC{i}"],
-            "CCDBIN": data.header[f"CCDBIN{i + 1}"],
-            "SATURATE": data.header.get_int(f"CCD{i}SAT", 65535),
-            "CCDTEMP": data.header.get_optional_float(
-                "CCDTMP", data.header.get_optional_float("DETTEMP", default=None)
+            "CCDSEC": image.header[f"CCDSEC{i}"],
+            "AMPSEC": image.header[f"AMPSEC{i}"],
+            "DETSEC": image.header[f"DETSEC{i}"],
+            "CCDBIN": image.header[f"CCDBIN{i + 1}"],
+            "SATURATE": image.header.get_int(f"CCD{i}SAT", 65535),
+            "CCDTEMP": image.header.get_optional_float(
+                "CCDTMP", image.header.get_optional_float("DETTEMP", default=None)
             ),
         }
         new_data_headers.append(

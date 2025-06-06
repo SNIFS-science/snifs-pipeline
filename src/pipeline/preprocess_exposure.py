@@ -33,13 +33,14 @@ class PreprocessExposure(FlowConfig):
 
 # This nasty little code loads in the preprocessed fits file Daniel sent me, so we can compare the results
 @plot()
-def debug_comparison(image: Image) -> Image:
+def debug_comparison(image: Image, channel: str) -> Image:
     import numpy as np
 
     # 005 and 006 are R and B continuum
     # 011 are the arcs
-    dan = Image.from_fits_file(Path(__file__).parents[2] / ".data_dump/P25_057_001_005_07_R.fits", transpose=True)
-    dan.variance[dan.variance > 1e10] = np.inf
+    file_name = "P25_057_001_005_07_R.fits" if channel == "R" else "P25_057_001_006_07_B.fits"
+    dan = Image.from_fits_file(Path(__file__).parents[2] / f".data_dump/{file_name}", transpose=True)
+    dan.variance[dan.variance > 1e6] = np.inf
     return dan
 
 
@@ -72,7 +73,7 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
 
     chip.image = handle_cosmetics(chip.image, chip.primary_headers)
 
-    debug_comparison(chip.image)
+    debug_comparison(chip.image, chip.primary_headers.get_str("CHANNEL"))
     plot_images(primary)
 
 
