@@ -17,8 +17,18 @@ def correct_even_odd_image(image: Image) -> Image:
     # TODO: this needs to be done on the bias section
     _, data, _ = image.get_bias_section()
     data = data.astype(np.float64)
+
+    # NaN out points that are more than 3 sigma away from the global median and 10-90th std
+    median = np.median(data)
+    minv, maxv = np.percentile(data, [10, 90])
+    std_dev = np.std(data[(data > minv) & (data < maxv)], axis=0)
+    mask = np.abs(data - median) < 3 * std_dev
+    data[~mask] = np.nan
+
     odd_differences = data[:-1:2, :] - data[1::2, :]
-    odd_means = np.mean(odd_differences, axis=0).flatten()  # TODO: check axis. This should be y-length (4096 or so)
+    odd_means = np.nanmean(odd_differences, axis=0).flatten()
+    # fill NaNs with the mean of the odd differences
+    odd_means = np.nan_to_num(odd_means, nan=np.nanmean(odd_means))
 
     # Perform a linear regression on the mean odd differences
     result = linregress(np.arange(odd_means.size), odd_means)
@@ -29,12 +39,12 @@ def correct_even_odd_image(image: Image) -> Image:
     correction = 0.5 * (result.intercept + result.slope * x_values)  # type: ignore
     # The original code (overscan.cxx:431,436) subtracts the correction if even
     # and adds it if odd
-    image.data[::2, :] -= correction
+    image.data[:-1:2, :] -= correction
     image.data[1::2, :] += correction
 
     # We create the params to put in headers for historical purposes
     image.header["OEPARAM"] = [result.slope, result.intercept]  # type: ignore
-    logger.info(f"Applied even-odd correction: slope={result.slope:0.3f}, intercept={result.intercept:0.3f} to image.")  # type: ignore
+    logger.info(f"Applied even-odd correction: slope={result.slope:0.4f}, intercept={result.intercept:0.4f} to image.")  # type: ignore
     return image
 
 
@@ -93,18 +103,13 @@ def subtract_offset_image(image: Image) -> Image:
     # Now that we have the medians and the variance, overscan.cxx:83. SubstractRamp is called
     # This algorithm makes a ramp between left and right overscans
     # I note that the first pixel of the medians (due to window effects) is trash and should not be used
-    # There's a "line zero" which according to a comment is 1024/2 + 1 + 1024 = 1537.
-    # I made a plot of this median data and line zero (docs/plots/overscan_ramp.png) and its a lot
-    # more obvious why there's an inflection point when you look at the data.
-    # ? Im confused as to where how theres any actual ramp though... I thought it was going to
-    # ? make two ramps, one for the LHS and one for the RHS. Instead, on the index1 column,
-    # ? the slope is set to the delta from a 1pixel lookahead. Each step forward in the median array
-    # ? then sets the slope/intercept based on the prior value... but like... where is the consistent ramp?
-    x_length = image.data.shape[0]
+    # There's a "line zero" which according to a comment is (S->X1()+S->X2())/2.0+1+Nx() where S is biassec region
+    x_length = bias_data.shape[0]
+    line_length = image.data.shape[0]
     line_zero = int(x_length // 2 + 1 + x_length)
     # below is overscan.cxx:128 and 131
-    multiplier = (medians[1:] - medians[:-1]) / x_length
-    offset = ((medians[1:] - medians[:-1]) * (x_length - line_zero) / x_length) + medians[:-1]
+    multiplier = (medians[1:] - medians[:-1]) / line_length
+    offset = ((medians[1:] - medians[:-1]) * (line_length - line_zero) / line_length) + 2 * medians[:-1] - medians[1:]
 
     # For the first pixel, we want add = value and multipler = 0 (overscan.cxx:108)
     multiplier = np.insert(multiplier, 0, 0)
@@ -115,7 +120,7 @@ def subtract_offset_image(image: Image) -> Image:
     multiplier = np.pad(multiplier, (0, image.data.shape[1] - len(multiplier)), mode="constant", constant_values=0)
     offset = np.pad(offset, (0, image.data.shape[1] - len(offset)), mode="edge")
 
-    correction = np.arange(x_length)[:, None] @ multiplier[None, :] + offset[None, :]
+    correction = np.arange(line_length)[:, None] @ multiplier[None, :] + offset[None, :]
     image.data -= correction
 
     # The variance is just a constant value (apart from at the window boundary technically)

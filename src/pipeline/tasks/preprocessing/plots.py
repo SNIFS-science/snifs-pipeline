@@ -21,31 +21,47 @@ _DATA_STORE: dict[str, list[Image]] = {}
 
 P = ParamSpec("P")
 R = TypeVar("R")
-ZOOM_START = (512, 512)
+ZOOM_START = (1024 + 32 - 100, 512)
 ZOOM_SIZE = (100, 100)
+ZOOM_END = (ZOOM_START[0] + ZOOM_SIZE[0], ZOOM_START[1] + ZOOM_SIZE[1])
+MIDLINE_X_COORD = ZOOM_START[0] + ZOOM_SIZE[0] // 2
+MIDLINE_Y_COORD = ZOOM_START[1] + ZOOM_SIZE[1] // 2
+MIDLINE_HORIZONTAL_COLOUR = "#146727"
+MIDLINE_VERTICAL_COLOUR = "#755028"
 
 # I love the tailwind colours, and you can get them from the tailwind site
 # or this fun tool: https://tailscan.com/colors
 LINES_X: dict[int, str] = {
-    256: "#9f1239",
-    525: "#d97706",
+    # 256: "#9f1239",
+    525: "#9f1239",
+    1032: "#d97706",
 }
 LINES_Y: dict[int, str] = {
-    512: "#86198f",
-    1024: "#22c55e",
-    1536: "#0e7490",
-    2048: "#fb7185",
+    # 10: "#86198f",
+    # 512: "#86198f",
+    # 1024: "#22c55e",
+    # 1536: "#0e7490",
+    # 2048: "#fb7185",
+    4090: "#fb7185",
 }
 
 
 def determine_output_path(primary: FileStoreEntry) -> Path:
     run_id = "run_id=" + (primary.run_id or "unknown")
     channel = "channel=" + (primary.channel or "unknown")
-    obstype = "obstype=" + (primary.type or "unknown")
+    obstype = "obstype=" + (primary.type.value or "unknown")
     output_path = settings.output_path / "plots" / run_id / obstype / channel
     shutil.rmtree(output_path, ignore_errors=True)  # type: ignore
     output_path.mkdir(parents=True, exist_ok=True)
     return output_path
+
+
+def determine_figure_prefix(primary: FileStoreEntry) -> str:
+    """Determine the figure title based on the primary file's metadata."""
+    run_id = primary.run_id or "unknown"
+    channel = primary.channel or "unknown"
+    obstype = primary.type.value or "unknown"
+    return f"{obstype=} - {run_id=} - {channel=}"
 
 
 def ensure_list[T](x: T | list[T]) -> list[T]:
@@ -116,8 +132,27 @@ def add_ticks(ax: plt.Axes, locations: dict[int, str], axis: str = "y", reach: f
             ax.axhline(location, xmin=0, xmax=reach, color=colour)
             ax.axhline(location, xmin=(1 - reach), xmax=1, color=colour)
         elif axis == "x":
-            ax.axvline(location, ymin=reach, ymax=2 * reach, color=colour)
+            ax.axvline(location, ymin=0, ymax=reach, color=colour)
             ax.axvline(location, ymin=(1 - reach), ymax=1, color=colour)
+
+
+def add_midlines(ax: plt.Axes) -> None:  # type: ignore
+    ax.hlines(
+        MIDLINE_Y_COORD,
+        xmin=ZOOM_START[0],
+        xmax=ZOOM_END[0],
+        color=MIDLINE_HORIZONTAL_COLOUR,
+        lw=0.5,
+    )
+    ax.vlines(
+        MIDLINE_X_COORD,
+        ymin=ZOOM_START[1],
+        ymax=ZOOM_END[1],
+        color=MIDLINE_VERTICAL_COLOUR,
+        lw=0.5,
+    )
+    ax.set_xmargin(0)
+    ax.set_ymargin(0)
 
 
 @pipeline_task()
@@ -131,6 +166,7 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
         return
 
     output_path = determine_output_path(primary)
+    title_prefix = determine_figure_prefix(primary)
 
     cmap_data = cmr.torch
     cmap_zoom = cmr.rainforest
@@ -140,25 +176,22 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
     all_data = np.concatenate(
         [im.data.astype(np.float64).flatten() for images in _DATA_STORE.values() for im in images]
     )
-    all_data_zooms = np.concatenate(
-        [extract_zoom(im.data).astype(np.float64).flatten() for images in _DATA_STORE.values() for im in images]
-    )
-
     min_c_data, max_c_data = np.percentile(all_data, [1, 99])
-    min_c_data_zoom, max_c_data_zoom = np.percentile(all_data_zooms, [1, 99])
 
     prior_images = None
     for i, (key, images) in enumerate(_DATA_STORE.items()):
+        title = f"{title_prefix} - {key}"
         num_cols = len(images) * 4
         aspect_ratio = images[0].data.shape[1] / images[0].data.shape[0]
 
         fig, axes = plt.subplots(
-            4,
+            5,
             num_cols,
-            figsize=(num_cols * 1.5 + 5, 14),
-            gridspec_kw={"hspace": 0.2, "wspace": 0.2},
-            height_ratios=[aspect_ratio, 1, 1, 1],
+            figsize=(num_cols * 1.5 + 7, 16),
+            gridspec_kw={"hspace": 0.3, "wspace": 0.2},
+            height_ratios=[aspect_ratio, 1, 1, 1, 1],
         )
+        axes[0, 0].annotate(title, xy=(0, 1.01), xycoords="axes fraction", ha="left", va="bottom", fontsize=10)
         for k, image in enumerate(images):
             # Yeah this is ugly.
             axd, axv = axes[0, 4 * k], axes[0, 4 * k + 2]  # data and variance axes
@@ -169,34 +202,34 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
             axydl, axyvl = axes[3, 4 * k], axes[3, 4 * k + 2]  # line plots for data and variance in y
             axxddl, axxvdl = axes[2, 4 * k + 1], axes[2, 4 * k + 3]  # line plots for data and variance difference for x
             axyddl, axyvdl = axes[3, 4 * k + 1], axes[3, 4 * k + 3]  # line plots for data and variance difference for y
+            axxc, axyc = axes[4, 4 * k], axes[4, 4 * k + 2]  # axes for the callout midline line plots
+            axxcd, axycd = (axes[4, 4 * k + 1], axes[4, 4 * k + 3])  # axes for the callout midline differences
 
             data, variance = image.data.astype(np.float64), image.variance.astype(np.float64)
             data[~np.isfinite(data)] = np.nan
             variance[~np.isfinite(variance)] = np.nan
+            im_kw = {
+                "origin": "lower",
+                "interpolation": "none",
+            }
 
-            imd = axd.imshow(data.T, cmap=cmap_data, aspect="equal", origin="lower", vmin=min_c_data, vmax=max_c_data)
+            imd = axd.imshow(data.T, cmap=cmap_data, aspect="equal", vmin=min_c_data, vmax=max_c_data, **im_kw)
             add_colorbar(f"Data {k}", fig, axd, imd)
-            imv = axv.imshow(
-                variance.T, cmap=cmap_data, aspect="equal", origin="lower", vmin=min_c_data, vmax=max_c_data
-            )
+            imv = axv.imshow(variance.T, cmap=cmap_data, aspect="equal", vmin=min_c_data, vmax=max_c_data, **im_kw)
             add_colorbar(f"Variance {k}", fig, axv, imv)
 
             imdz = axdz.imshow(
                 extract_zoom(data).T,
                 cmap=cmap_zoom,
                 aspect="auto",
-                origin="lower",
-                vmin=min_c_data_zoom,
-                vmax=max_c_data_zoom,
+                **im_kw,
             )
             add_colorbar(f"Zoomed Data {k}", fig, axdz, imdz, height=0.04)
             imvz = axvz.imshow(
                 extract_zoom(variance).T,
                 cmap=cmap_zoom,
                 aspect="auto",
-                origin="lower",
-                vmin=min_c_data_zoom,
-                vmax=max_c_data_zoom,
+                **im_kw,
             )
             add_colorbar(f"Zoomed Variance {k}", fig, axvz, imvz, height=0.04)
 
@@ -222,17 +255,17 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
                 vvmin = np.min(np.abs(variance_diff))
                 vvmax = np.max(np.abs(variance_diff))
 
-            imdd = axdd.imshow(data_diff.T, cmap=cmap_diff, aspect="equal", origin="lower", vmin=vdmin, vmax=vdmax)
+            imdd = axdd.imshow(data_diff.T, cmap=cmap_diff, aspect="equal", vmin=vdmin, vmax=vdmax, **im_kw)
             add_colorbar("ΔData", fig, axdd, imdd)
-            imvd = axvd.imshow(variance_diff.T, cmap=cmap_diff, aspect="equal", origin="lower", vmin=vvmin, vmax=vvmax)
+            imvd = axvd.imshow(variance_diff.T, cmap=cmap_diff, aspect="equal", vmin=vvmin, vmax=vvmax, **im_kw)
             add_colorbar("ΔVar", fig, axvd, imvd)
 
             zoomed_data_diff = extract_zoom(data_diff)
-            imddz = axdzd.imshow(zoomed_data_diff.T, cmap=cmap_diff, aspect="auto", origin="lower")
+            imddz = axdzd.imshow(zoomed_data_diff.T, cmap=cmap_diff, aspect="auto", **im_kw)
             add_colorbar("Zoomed ΔData", fig, axdzd, imddz, height=0.04)
 
             zoomed_variance_diff = extract_zoom(variance_diff)
-            imvdz = axvzd.imshow(zoomed_variance_diff.T, cmap=cmap_diff, aspect="auto", origin="lower")
+            imvdz = axvzd.imshow(zoomed_variance_diff.T, cmap=cmap_diff, aspect="auto", **im_kw)
             add_colorbar("Zoomed ΔVar", fig, axvzd, imvdz, height=0.04)
 
             for ax in (axd, axv, axdd, axvd):
@@ -244,39 +277,62 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
 
             # Now we add some line plots for better readability
             kwargs = {"lw": 0.5}
-            for location, colour in LINES_X.items():
-                axxdl.plot(data[location, :], color=colour, **kwargs)
-                axxvl.plot(variance[location, :], color=colour, **kwargs)
-                axxddl.plot(data_diff[location, :], color=colour, **kwargs)
-                axxvdl.plot(variance_diff[location, :], color=colour, **kwargs)
+            y_lim_percentages = [1, 99]
+            for ax, sec in [(axxdl, data), (axxvl, variance), (axxddl, data_diff), (axxvdl, variance_diff)]:
+                for location, colour in LINES_X.items():
+                    ax.plot(sec[location, :], color=colour, **kwargs)
 
-            for location, colour in LINES_Y.items():
-                axydl.plot(data[:, location], color=colour, **kwargs)
-                axyvl.plot(variance[:, location], color=colour, **kwargs)
-                axyddl.plot(data_diff[:, location], color=colour, **kwargs)
-                axyvdl.plot(variance_diff[:, location], color=colour, **kwargs)
+                dx = sec[list(LINES_X.keys()), :]
+                ax.set_ylim(*np.nanpercentile(dx, y_lim_percentages))
+
+            for ax, sec in [(axydl, data), (axyvl, variance), (axyddl, data_diff), (axyvdl, variance_diff)]:
+                for location, colour in LINES_Y.items():
+                    ax.plot(sec[:, location], color=colour, **kwargs)
+                dy = sec[:, list(LINES_Y.keys())]
+                ax.set_ylim(*np.nanpercentile(dy, y_lim_percentages))
+
+            # We also want to add the midlines to the midline axes
+            for ax, sec in [(axxc, data), (axyc, variance), (axxcd, data_diff), (axycd, variance_diff)]:
+                column = sec[MIDLINE_X_COORD, ZOOM_START[1] : ZOOM_END[1]]
+                ax.step(np.arange(column.size), column, where="post", color=MIDLINE_VERTICAL_COLOUR, **kwargs)
+                row = sec[ZOOM_START[0] : ZOOM_END[0], MIDLINE_Y_COORD]
+                ax.step(np.arange(row.size), row, where="post", color=MIDLINE_HORIZONTAL_COLOUR, **kwargs)
+                combined = np.concatenate((column.flatten(), row.flatten()))
+                ax.set_ylim(*np.nanpercentile(combined, y_lim_percentages))
 
             # We also want to mark this on the axes above as well. Not as a line,
             # as there would be too many, but as etra tick marks on the side of the axes.
             for ax in (axd, axv, axdd, axvd):
                 add_ticks(ax, LINES_X, axis="x", reach=0.02)
                 add_ticks(ax, LINES_Y, axis="y", reach=0.05)
-
-            if k == 0:
-                axd.set_title(key, size=8)
+                add_midlines(ax)
 
             for ax in (axd, axv, axdz, axvz, axdd, axvd, axdzd, axvzd):
                 ax.set_xticks([])
                 ax.set_yticks([])
-            for ax in (axxdl, axxvl, axxddl, axxvdl, axydl, axyvl, axyddl, axyvdl):
+            for ax in (axxdl, axxvl, axxddl, axxvdl, axydl, axyvl, axyddl, axyvdl, axxc, axyc, axxcd, axycd):
                 ax.set_yticks([])
                 ax.yaxis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=3))
                 ax.tick_params(axis="y", labelsize=6, labelrotation=90)
                 ax.tick_params(axis="both", labelsize=6)
                 ax.set_xmargin(0)
+
+            # Add some more labels
+            axxc.set_xlabel("Data callout midlines", fontsize=8)
+            axyc.set_xlabel("Variance callout midlines", fontsize=8)
+            axxcd.set_xlabel("ΔData midlines", fontsize=8)
+            axycd.set_xlabel("ΔVariance midlines", fontsize=8)
+            axxdl.set_xlabel("Data rows", fontsize=8)
+            axxvl.set_xlabel("Variance rows", fontsize=8)
+            axydl.set_xlabel("Data columns", fontsize=8)
+            axyvl.set_xlabel("Variance columns", fontsize=8)
+            axxddl.set_xlabel("ΔData rows", fontsize=8)
+            axyddl.set_xlabel("ΔData columns", fontsize=8)
+            axxvdl.set_xlabel("ΔVariance rows", fontsize=8)
+            axyvdl.set_xlabel("ΔVariance columns", fontsize=8)
         output_location = output_path / f"{i}_{key}.png"
         logger.info(f"Saving plot to {output_location}")
-        fig.savefig(output_location, dpi=600, bbox_inches="tight")
+        fig.savefig(output_location, dpi=450, bbox_inches="tight")
         plt.close(fig)
 
         prior_images = images

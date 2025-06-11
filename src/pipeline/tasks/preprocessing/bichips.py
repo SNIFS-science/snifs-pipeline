@@ -79,9 +79,9 @@ class BiChip(BaseModel, ChipMaker):
             datas = datas[::-1]
             variances = variances[::-1]
 
-            # For R channel, the first amplifier needs to be flipped in the X direction
-            datas[0] = datas[0][::-1, :]
-            variances[0] = variances[0][::-1, :]
+        # For R channel, the first amplifier needs to be flipped in the X direction
+        datas[0] = datas[0][::-1, :]
+        variances[0] = variances[0][::-1, :]
 
         # The second amplifier is always flipped in the x direction
         datas[1] = datas[1][::-1, :]
@@ -138,6 +138,7 @@ def split_chip(images: list[Image]) -> list[Image]:
         # If this is a detcom file and thus has two extensions to start with, great!
         # All we need to do then is standardise some header values and return the images.
         for i, image in enumerate(images):
+            image.header["CCDNUM"] = i
             image.header["GAIN"] = image.header.get_float(f"CCD{i}GAIN")
             image.header["CCDNAMP"] = 1
             image.header["SATURATE"] = image.header.get_int("CCD{i}SAT", 65535)
@@ -157,9 +158,7 @@ def split_chip(images: list[Image]) -> list[Image]:
         # Instead just cut the data and bias up!
         data_array = full_data[i * n_data : (i + 1) * n_data, :]
         bias_array = full_bias[i * n_bias : (i + 1) * n_bias, :]
-        # if i == 1:
-        # According to preprocessor.cxx:217,222, the first amp is in the normal direction
-        # But the second amp is flipped in the Y direction.
+
         data_array = data_array[:, ::-1]
         bias_array = bias_array[:, ::-1]
 
@@ -180,12 +179,13 @@ def split_chip(images: list[Image]) -> list[Image]:
             "CCDTEMP": image.header.get_optional_float(
                 "CCDTMP", image.header.get_optional_float("DETTEMP", default=None)
             ),
+            "CCDNUM": i,
         }
         new_data_headers.append(
             Image.from_array_and_dict(chip_header, combined, np.zeros_like(combined, dtype=np.float64))
         )
 
-    return new_data_headers
+    return new_data_headers  # R channel has chips reversed
 
 
 def override_headers(images: list[Image], primary_headers: Headers) -> list[Image]:

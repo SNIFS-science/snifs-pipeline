@@ -174,10 +174,10 @@ def cheat_cosmetics(image: Image, channel: str) -> Image:
 def handle_cosmetics(image: Image, primary_headers: Headers) -> Image:
     """Sets variance to infinity for known bad pixel regions"""
     image = image.copy()
-    channel = primary_headers.get_str("CHANNEL")
+    # channel = primary_headers.get_str("CHANNEL")
 
-    if channel == "R":
-        image = handle_special_red_cosmetics(image, primary_headers)
+    # if channel == "R":
+    #     image = handle_special_red_cosmetics(image, primary_headers)
 
-    image = cheat_cosmetics(image, channel)
+    # image = cheat_cosmetics(image, channel)
     return image
