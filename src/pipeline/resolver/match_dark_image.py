@@ -4,11 +4,9 @@ from pipeline.resolver.common import FileStoreDataFrame, FileStoreEntry, FileTyp
 from pipeline.resolver.registry import file_match_registry
 
 
-@file_match_registry.register(FileType.DARK_IMAGE)
+@file_match_registry.register(FileType.DARK)
 def find_dark_image_files(primary_file: FileStoreEntry | None, file_store: FileStoreDataFrame) -> list[FileStoreEntry]:
     assert primary_file is not None, "primary_file must be provided. There is no global suitable dark image file."
     # Try to match on the run_id
-    files = file_store.filter(
-        (pl.col("type").eq(FileType.DARK_IMAGE.value)) & (pl.col("channel").eq(primary_file.channel))
-    )
+    files = file_store.filter((pl.col("type").eq(FileType.DARK.value)) & (pl.col("channel").eq(primary_file.channel)))
     return [FileStoreEntry.model_validate(row) for row in files.to_dicts()]

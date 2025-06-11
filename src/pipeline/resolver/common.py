@@ -39,9 +39,9 @@ class FileType(StrEnum):
     DICHROIC_REFERENCE = "DICHROIC_REFERENCE"
     BINARY_OFFSET_MODEL = "BINARY_OFFSET_MODEL"
     DARK_MODEL = "DARK_MODEL"
-    DARK_IMAGE = "DARK_IMAGE"
+    DARK = "DARK"
     BIAS_MODEL = "BIAS_MODEL"
-    BIAS_IMAGE = "BIAS_IMAGE"
+    BIAS = "BIAS"
 
     @property
     def Path(self) -> type[FilePath]:

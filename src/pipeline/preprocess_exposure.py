@@ -21,9 +21,9 @@ from pipeline.tasks.preprocessing.plots import plot
 
 class PreprocessExposure(FlowConfig):
     primary_file: FilePath = Field(description="Location of the continuum exposure file. Relative to the data path.")
-    bias_image_file: FileType.BIAS_IMAGE.Path = Field(default=None)  # type: ignore
+    bias_image_file: FileType.BIAS.Path = Field(default=None)  # type: ignore
     bias_model_file: FileType.BIAS_MODEL.Path = Field(default=None)  # type: ignore
-    dark_image_file: FileType.DARK_IMAGE.Path = Field(default=None)  # type: ignore
+    dark_image_file: FileType.DARK.Path = Field(default=None)  # type: ignore
     dark_model_file: FileType.DARK_MODEL.Path = Field(default=None)  # type: ignore
     binary_offset_model_file: FileType.BINARY_OFFSET_MODEL.Path = Field(default=None)  # type: ignore
     prefer_bias_image_over_model: bool = Field(default=True)
@@ -78,7 +78,8 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
 
 
 if __name__ == "__main__":
-    continuum_file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_red.fits"
-    # continuum_file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_blue.fits"
-    config = PreprocessExposure(primary_file=continuum_file)
+    # file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_121_118/bias_red.fits"
+    file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_red.fits"
+    # file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_blue.fits"
+    config = PreprocessExposure(primary_file=file)
     preprocess_exposure(config)
