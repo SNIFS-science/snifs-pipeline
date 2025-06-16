@@ -11,8 +11,6 @@ from pipeline.tasks.common import (
     load_all_data_extensions_with_headers,
     load_headers,
 )
-from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
-from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
 from pipeline.tasks.preprocessing.plots import log_image_data, plot
 
 GAINS = {
@@ -73,15 +71,16 @@ class BiChip(BaseModel, ChipMaker):
         # Go through and reverse directions as needed
         datas = [image.get_data_section() * image.header.get_float("GAIN") for image in self.images]
         variances = [image.get_data_section_variance() * (image.header.get_float("GAIN") ** 2) for image in self.images]
-
+        channel = self.primary_headers.get_str("CHANNEL")
         # If you're in the R channel, chip0 is on the right and chip1 is on the left
-        if self.primary_headers.get_str("CHANNEL") == "R":
+        if channel == "R":
             datas = datas[::-1]
             variances = variances[::-1]
 
-        # For R channel, the first amplifier needs to be flipped in the X direction
-        datas[0] = datas[0][::-1, :]
-        variances[0] = variances[0][::-1, :]
+        # If not R channel, flip the first amplifier in the X direction
+        if channel != "R":
+            datas[0] = datas[0][::-1, :]
+            variances[0] = variances[0][::-1, :]
 
         # The second amplifier is always flipped in the x direction
         datas[1] = datas[1][::-1, :]
@@ -94,6 +93,10 @@ class BiChip(BaseModel, ChipMaker):
         primary_headers = self.primary_headers.copy()
         for i, image in enumerate(self.images):
             primary_headers[f"CCD{i}GAIN"] = image.header.get_float("GAIN")
+            primary_headers[f"RDNOISE{i}"] = image.header.get_float("RDNOISE") * image.header.get_float("GAIN")
+            primary_headers[f"OVSCMAX{i}"] = image.header.get_float("OVSCMAX")
+            primary_headers[f"OVSCMED{i}"] = image.header.get_float("OVSCMED")
+            primary_headers[f"OEPARAM{i}"] = image.header.get_float_list("OEPARAM")
 
         # So the saturation calculation is more complex
         saturations: list[float] = [
@@ -142,6 +145,13 @@ def split_chip(images: list[Image]) -> list[Image]:
             image.header["GAIN"] = image.header.get_float(f"CCD{i}GAIN")
             image.header["CCDNAMP"] = 1
             image.header["SATURATE"] = image.header.get_int("CCD{i}SAT", 65535)
+            # As per algocams.cxx:125, detcom images drop the first 11 columns of overscan!
+            # The fact this is twelve below is because this is 1-indexed
+            # EDIT: Actually, going off the comment both detcom and otcom want 10 columns dropped?
+            # comment: remove a few pixels (10)
+            b, _, _ = image.get_bias_section()
+            image.header["BIASSEC"] = f"[{b.x_min + 11}:{b.x_max},{b.y_min + 1}:{b.y_max}]"
+
         return images
     image = images[0]
     new_data_headers = []
@@ -162,14 +172,20 @@ def split_chip(images: list[Image]) -> list[Image]:
         data_array = data_array[:, ::-1]
         bias_array = bias_array[:, ::-1]
 
+        if i == 1:
+            # The second chip is flipped in the X direction
+            data_array = data_array[::-1, :]
+            bias_array = bias_array[::-1, :]
+
         combined = np.vstack((data_array, bias_array))
 
         chip_header = image.header | {
             "GAIN": image.header[f"CCD{i}GAIN"],  # This is set in the hack fits keywords
             "CCDNAMP": 1,
             "DATASEC": f"[1:{data_array.shape[0]},1:{data_array.shape[1]}]",
+            # As per algocams.cxx:235, otcom images discard the first 10 rows.
             "BIASSEC": (
-                f"[{data_array.shape[0] + 1}:{data_array.shape[0] + bias_array.shape[0]},1:{bias_array.shape[1]}]"
+                f"[{data_array.shape[0] + 11}:{data_array.shape[0] + bias_array.shape[0] - 1},1:{bias_array.shape[1]}]"
             ),
             "CCDSEC": image.header[f"CCDSEC{i}"],
             "AMPSEC": image.header[f"AMPSEC{i}"],
@@ -197,7 +213,7 @@ def override_headers(images: list[Image], primary_headers: Headers) -> list[Imag
     return result
 
 
-def build_bichip_from_fits(path: Path, binary_offset_model_file: Path) -> BiChip:
+def build_bichip_from_fits(path: Path) -> tuple[Headers, list[Image]]:
     """Load a BiChip from a FITS file. Note for conventions used and broken,
     we're following most of what the older C++ code did. One of those
     things which may be confusing, is that in a 2D numpy array,
@@ -212,21 +228,7 @@ def build_bichip_from_fits(path: Path, binary_offset_model_file: Path) -> BiChip
     # which in this case means two images, one from each amplifier.
     images = split_chip(images)
     images = override_headers(images, primary_headers)
-
-    # And handle saturation by inf'ing out the variance and accounting for bleed
-    images = handle_saturation(images)
-
-    # Binary offset model is only derived for 2 chip models.
-    if len(images) == 2:
-        images = correct_binary_offset(images, binary_offset_model_file)
-
-    # The odd-even effect is touched on in Emmanual Gangler's thesis, section 3.3.2
-    # which you can find in the docs/pdfs folder in this repository.
-    images = correct_even_odd(images)
-    images = add_overscan_variance(images)
-    images = subtract_offset(images)
-
-    return BiChip(primary_headers=primary_headers, images=images)  # type: ignore
+    return primary_headers, images
 
 
 def handle_saturation_image(image: Image) -> Image:

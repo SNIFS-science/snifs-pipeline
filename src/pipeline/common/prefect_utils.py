@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import ParamSpec, TypeVar
 
 from prefect import Flow, flow, task
 from prefect.client.schemas.objects import FlowRun, State
@@ -10,6 +11,8 @@ from prefect.client.schemas.objects import FlowRun, State
 # from prefect.runtime.flow_run import get_flow_name
 
 # from prefect.client.schemas.objects import StateType
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 def on_finish(flow: Flow, flow_run: FlowRun, state: State):
@@ -37,7 +40,7 @@ FLOW_DEFAULT_KWARGS = {
 
 
 def pipeline_task(**kwargs):
-    def decorate(func: Callable) -> Callable:
+    def decorate(func: Callable[P, R]) -> Callable[P, R]:
         # tracer = get_tracer(settings.service)
         # final_kwargs = {**TASK_DEFAULT_KWARGS, **kwargs}
         # name = kwargs.get("name", func.__name__)

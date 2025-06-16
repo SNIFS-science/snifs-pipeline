@@ -2,7 +2,7 @@ import shutil
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import ParamSpec, TypeVar
+from typing import OrderedDict, ParamSpec, TypeVar
 
 import cmasher as cmr
 import matplotlib.patches as patches
@@ -17,7 +17,8 @@ from pipeline.common.prefect_utils import pipeline_task
 from pipeline.resolver.common import FileStoreEntry
 from pipeline.tasks.common import Image, Section, get_section_range
 
-_DATA_STORE: dict[str, list[Image]] = {}
+_IMAGE_STORE: dict[str, list[Image]] = OrderedDict()
+_BIAS_STORE: dict[str, list[Image]] = OrderedDict()
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -32,18 +33,29 @@ MIDLINE_VERTICAL_COLOUR = "#755028"
 # I love the tailwind colours, and you can get them from the tailwind site
 # or this fun tool: https://tailscan.com/colors
 LINES_X: dict[int, str] = {
-    # 256: "#9f1239",
-    525: "#9f1239",
+    2: "#e4e23b",
+    1022: "#9f1239",
     1032: "#d97706",
 }
 LINES_Y: dict[int, str] = {
-    # 10: "#86198f",
+    10: "#86198f",
     # 512: "#86198f",
     # 1024: "#22c55e",
     # 1536: "#0e7490",
     # 2048: "#fb7185",
     4090: "#fb7185",
 }
+CMAP_DATA = cmr.torch
+CMAP_ZOOM = cmr.rainforest
+CMAP_DIFF = cmr.prinsenvlag
+
+
+def clear_output_path(primary: FileStoreEntry) -> None:
+    """Clear the output path for the given primary file."""
+    output_path = determine_output_path(primary)
+    if output_path.exists():
+        shutil.rmtree(output_path, ignore_errors=True)  # type: ignore
+        get_logger().info(f"Cleared output path: {output_path}")
 
 
 def determine_output_path(primary: FileStoreEntry) -> Path:
@@ -51,7 +63,6 @@ def determine_output_path(primary: FileStoreEntry) -> Path:
     channel = "channel=" + (primary.channel or "unknown")
     obstype = "obstype=" + (primary.type.value or "unknown")
     output_path = settings.output_path / "plots" / run_id / obstype / channel
-    shutil.rmtree(output_path, ignore_errors=True)  # type: ignore
     output_path.mkdir(parents=True, exist_ok=True)
     return output_path
 
@@ -75,10 +86,25 @@ def plot():
     def decorate(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
         def inner(images: Image | list[Image], *args, **kwargs) -> Image | list[Image]:
-            if not _DATA_STORE:
-                _DATA_STORE["initial"] = ensure_list(images)
+            if not _IMAGE_STORE:
+                _IMAGE_STORE["initial"] = ensure_list(images)
             result = func(images, *args, **kwargs)  # type: ignore
-            _DATA_STORE[func.__name__] = ensure_list(result)
+            _IMAGE_STORE[func.__name__] = ensure_list(result)
+            return result
+
+        return inner  # type: ignore
+
+    return decorate
+
+
+def plot_bias():
+    def decorate(func: Callable[P, R]) -> Callable[P, R]:
+        @wraps(func)
+        def inner(images: Image | list[Image], *args, **kwargs) -> Image | list[Image]:
+            if not _BIAS_STORE:
+                _BIAS_STORE["initial"] = ensure_list(images)
+            result = func(images, *args, **kwargs)  # type: ignore
+            _BIAS_STORE[func.__name__] = ensure_list(result)
             return result
 
         return inner  # type: ignore
@@ -90,10 +116,10 @@ def log_image_data(name: str, images: Image | list[Image]) -> None:
     if isinstance(images, Image):
         images = [images]
 
-    if not _DATA_STORE:
-        _DATA_STORE["initial"] = images
+    if not _IMAGE_STORE:
+        _IMAGE_STORE["initial"] = images
 
-    _DATA_STORE[name] = images
+    _IMAGE_STORE[name] = images
 
 
 def extract_zoom(data: np.ndarray) -> np.ndarray:
@@ -168,18 +194,22 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
     output_path = determine_output_path(primary)
     title_prefix = determine_figure_prefix(primary)
 
-    cmap_data = cmr.torch
-    cmap_zoom = cmr.rainforest
-    cmap_diff = cmr.prinsenvlag
-    # One column for data, one for variance
-
     all_data = np.concatenate(
-        [im.data.astype(np.float64).flatten() for images in _DATA_STORE.values() for im in images]
+        [im.data.astype(np.float64).flatten() for images in _IMAGE_STORE.values() for im in images]
     )
     min_c_data, max_c_data = np.percentile(all_data, [1, 99])
 
+    tasks_to_plot, prior_images = {}, None
+    for key, images in _IMAGE_STORE.items():
+        if prior_images is not None and images == prior_images:
+            prior_images = images
+            logger.warning(f"Skipping plotting for {key} as it is the same as the previous task.")
+            continue
+        prior_images = images
+        tasks_to_plot[key] = images
+
     prior_images = None
-    for i, (key, images) in enumerate(_DATA_STORE.items()):
+    for i, (key, images) in enumerate(_IMAGE_STORE.items()):
         title = f"{title_prefix} - {key}"
         num_cols = len(images) * 4
         aspect_ratio = images[0].data.shape[1] / images[0].data.shape[0]
@@ -213,21 +243,21 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
                 "interpolation": "none",
             }
 
-            imd = axd.imshow(data.T, cmap=cmap_data, aspect="equal", vmin=min_c_data, vmax=max_c_data, **im_kw)
+            imd = axd.imshow(data.T, cmap=CMAP_DATA, aspect="equal", vmin=min_c_data, vmax=max_c_data, **im_kw)
             add_colorbar(f"Data {k}", fig, axd, imd)
-            imv = axv.imshow(variance.T, cmap=cmap_data, aspect="equal", vmin=min_c_data, vmax=max_c_data, **im_kw)
+            imv = axv.imshow(variance.T, cmap=CMAP_DATA, aspect="equal", vmin=min_c_data, vmax=max_c_data, **im_kw)
             add_colorbar(f"Variance {k}", fig, axv, imv)
 
             imdz = axdz.imshow(
                 extract_zoom(data).T,
-                cmap=cmap_zoom,
+                cmap=CMAP_ZOOM,
                 aspect="auto",
                 **im_kw,
             )
             add_colorbar(f"Zoomed Data {k}", fig, axdz, imdz, height=0.04)
             imvz = axvz.imshow(
                 extract_zoom(variance).T,
-                cmap=cmap_zoom,
+                cmap=CMAP_ZOOM,
                 aspect="auto",
                 **im_kw,
             )
@@ -251,21 +281,27 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
             if np.std(data_diff) < 1e-5:
                 vdmin = np.min(np.abs(data_diff))
                 vdmax = np.max(np.abs(data_diff))
+            else:
+                vdmin, vdmax = np.nanpercentile(data_diff, [1, 99])
             if np.std(variance_diff) < 1e-5:
                 vvmin = np.min(np.abs(variance_diff))
                 vvmax = np.max(np.abs(variance_diff))
+            else:
+                vvmin, vvmax = np.nanpercentile(variance_diff, [1, 99])
 
-            imdd = axdd.imshow(data_diff.T, cmap=cmap_diff, aspect="equal", vmin=vdmin, vmax=vdmax, **im_kw)
+            imdd = axdd.imshow(data_diff.T, cmap=CMAP_DIFF, aspect="equal", vmin=vdmin, vmax=vdmax, **im_kw)
             add_colorbar("ΔData", fig, axdd, imdd)
-            imvd = axvd.imshow(variance_diff.T, cmap=cmap_diff, aspect="equal", vmin=vvmin, vmax=vvmax, **im_kw)
+            imvd = axvd.imshow(variance_diff.T, cmap=CMAP_DIFF, aspect="equal", vmin=vvmin, vmax=vvmax, **im_kw)
             add_colorbar("ΔVar", fig, axvd, imvd)
 
             zoomed_data_diff = extract_zoom(data_diff)
-            imddz = axdzd.imshow(zoomed_data_diff.T, cmap=cmap_diff, aspect="auto", **im_kw)
+            vmin, vmax = np.nanpercentile(zoomed_data_diff, [1, 99])
+            imddz = axdzd.imshow(zoomed_data_diff.T, cmap=CMAP_DIFF, aspect="auto", vmin=vmin, vmax=vmax, **im_kw)
             add_colorbar("Zoomed ΔData", fig, axdzd, imddz, height=0.04)
 
             zoomed_variance_diff = extract_zoom(variance_diff)
-            imvdz = axvzd.imshow(zoomed_variance_diff.T, cmap=cmap_diff, aspect="auto", **im_kw)
+            vmin, vmax = np.nanpercentile(zoomed_variance_diff, [1, 99])
+            imvdz = axvzd.imshow(zoomed_variance_diff.T, cmap=CMAP_DIFF, aspect="auto", vmin=vmin, vmax=vmax, **im_kw)
             add_colorbar("Zoomed ΔVar", fig, axvzd, imvdz, height=0.04)
 
             for ax in (axd, axv, axdd, axvd):
@@ -322,17 +358,95 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
             axyc.set_xlabel("Variance callout midlines", fontsize=8)
             axxcd.set_xlabel("ΔData midlines", fontsize=8)
             axycd.set_xlabel("ΔVariance midlines", fontsize=8)
-            axxdl.set_xlabel("Data rows", fontsize=8)
-            axxvl.set_xlabel("Variance rows", fontsize=8)
-            axydl.set_xlabel("Data columns", fontsize=8)
-            axyvl.set_xlabel("Variance columns", fontsize=8)
-            axxddl.set_xlabel("ΔData rows", fontsize=8)
-            axyddl.set_xlabel("ΔData columns", fontsize=8)
-            axxvdl.set_xlabel("ΔVariance rows", fontsize=8)
-            axyvdl.set_xlabel("ΔVariance columns", fontsize=8)
+            axydl.set_xlabel("Data rows", fontsize=8)
+            axyddl.set_xlabel("ΔData rows", fontsize=8)
+            axyvl.set_xlabel("Variance rows", fontsize=8)
+            axxvl.set_xlabel("Variance columns", fontsize=8)
+            axxdl.set_xlabel("Data columns", fontsize=8)
+            axxddl.set_xlabel("ΔData columns", fontsize=8)
+            axyvdl.set_xlabel("ΔVariance rows", fontsize=8)
+            axxvdl.set_xlabel("ΔVariance columns", fontsize=8)
         output_location = output_path / f"{i}_{key}.png"
         logger.info(f"Saving plot to {output_location}")
         fig.savefig(output_location, dpi=450, bbox_inches="tight")
         plt.close(fig)
 
         prior_images = images
+
+
+@pipeline_task()
+def plot_bias_sections(primary_file: FileStoreEntry) -> None:
+    """Plot the bias section of the images."""
+    logger = get_logger()
+    if not settings.plot:
+        logger.info("Plotting is disabled. Skipping bias section plot generation.")
+        return
+
+    output_path = determine_output_path(primary_file)
+
+    prior_images = None
+    for i, (key, images) in enumerate(_BIAS_STORE.items()):
+        fig, axes = plt.subplots(
+            2,
+            len(images),
+            figsize=(len(images) * 3 + 3, 12),
+            gridspec_kw={"hspace": 0.2, "wspace": 0.2},
+        )
+        title_prefix = determine_figure_prefix(primary_file)
+        title = f"BIASSEC - {title_prefix} - {key}"
+        axes[0, 0].annotate(title, xy=(0, 1.01), xycoords="axes fraction", ha="left", va="bottom", fontsize=10)
+
+        for k, image in enumerate(images):
+            ax = axes[0, k]
+            axd = axes[1, k]
+
+            _, bias_data, _ = image.get_bias_section()
+            if (
+                prior_images is not None
+                and len(prior_images) == len(images)
+                and prior_images[k].data.shape == image.data.shape
+            ):
+                _, prior_image_data, _ = prior_images[k].get_bias_section()
+                bias_diff = bias_data - prior_image_data
+            else:
+                bias_diff = np.zeros_like(bias_data)
+
+            cmin, cmax = np.percentile(bias_data, [1, 99])
+            im = ax.imshow(
+                bias_data.T,
+                origin="lower",
+                interpolation="none",
+                cmap=CMAP_DATA,
+                aspect="auto",
+                vmin=cmin,
+                vmax=cmax,
+            )
+            add_colorbar(f"Bias Section (mean={np.nanmean(bias_data):.2f}, std{np.nanstd(bias_data):.2f})", fig, ax, im)
+
+            cmin, cmax = np.percentile(bias_diff, [1, 99])
+            im = axd.imshow(
+                bias_diff.T,
+                origin="lower",
+                interpolation="none",
+                cmap=CMAP_DIFF,
+                aspect="auto",
+                vmin=np.nanmin(bias_diff),
+                vmax=np.nanmax(bias_diff),
+            )
+            add_colorbar(
+                f"Bias Section Diff (mean={np.nanmean(bias_diff):.2f}, std{np.nanstd(bias_diff):.2f})",
+                fig,
+                axd,
+                im,
+            )
+
+            ax.set_xticks([])
+            axd.set_xticks([])
+            ax.tick_params(axis="y", labelsize=6)
+            axd.tick_params(axis="y", labelsize=6)
+
+        prior_images = images
+
+        output_location = output_path / f"bias_{i}_{key}.png"
+        logger.info(f"Saving bias section plot to {output_location}")
+        fig.savefig(output_location, dpi=900, bbox_inches="tight")

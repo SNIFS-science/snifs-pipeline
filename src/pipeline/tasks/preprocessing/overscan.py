@@ -5,11 +5,13 @@ from scipy.stats import linregress
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_task
 from pipeline.tasks.common import Image, flag_skip, listify
-from pipeline.tasks.preprocessing.plots import plot
+from pipeline.tasks.preprocessing.plots import plot, plot_bias
 
 
 @flag_skip("OEPARAM")
 def correct_even_odd_image(image: Image) -> Image:
+    """The odd-even effect is touched on in Emmanual Gangler's thesis, section 3.3.2
+    which you can find in the docs/pdfs folder in this repository."""
     image = image.copy()
     logger = get_logger()
     # TODO: It would be good to actually test this in case the "S->XFirst()" is a 0 or 1
@@ -32,34 +34,40 @@ def correct_even_odd_image(image: Image) -> Image:
 
     # Perform a linear regression on the mean odd differences
     result = linregress(np.arange(odd_means.size), odd_means)
+    slope, intercept = result.slope, result.intercept  # type: ignore
+
+    # slope, intercept = -6.072720355e-06, -1.4087406134
+    # slope, intercept = 2.5839584208e-05, 1.0279772404
+    # logger.warning("You're still using hardcoded values bruh")
 
     # At this point we have a linear fit to the odd differences in the bias section.
     # TODO: This part is super confusing to read to. Conceptually I think its just subtract it out
-    x_values = np.arange(image.data.shape[1], dtype=np.float64)
-    correction = 0.5 * (result.intercept + result.slope * x_values)  # type: ignore
+    y_values = np.arange(image.data.shape[1], dtype=np.float64)
+    correction = 0.5 * (intercept + slope * y_values)  # type: ignore
     # The original code (overscan.cxx:431,436) subtracts the correction if even
     # and adds it if odd
     image.data[:-1:2, :] -= correction
     image.data[1::2, :] += correction
 
     # We create the params to put in headers for historical purposes
-    image.header["OEPARAM"] = [result.slope, result.intercept]  # type: ignore
-    logger.info(f"Applied even-odd correction: slope={result.slope:0.4f}, intercept={result.intercept:0.4f} to image.")  # type: ignore
+    image.header["OEPARAM"] = [intercept, slope]
+    logger.info(f"Applied even-odd correction: slope={slope:0.5g}, intercept={intercept:0.4f} to image.")  # type: ignore
     return image
 
 
-correct_even_odd = plot()(pipeline_task()(listify(correct_even_odd_image)))
+correct_even_odd = plot_bias()(plot()(pipeline_task()(listify(correct_even_odd_image))))
 
 
 @flag_skip("OVSCNOIS")
 def add_overscan_variance_image(image: Image) -> Image:
     logger = get_logger()
     image = image.copy()
-    _, data, _ = image.get_bias_section()
-    variance = np.var(data)
-    image.header["RDNOISE"] = np.sqrt(variance)
+    _, var, _ = image.get_bias_section()
+    variance = np.mean(np.var(var[:, 1:-1], ddof=1, axis=0))
+    rdnoise = np.sqrt(variance)
+    image.header["RDNOISE"] = rdnoise
     image.variance += variance
-    logger.info(f"Added overscan variance: {variance:0.3f} to image.")
+    logger.info(f"Added overscan variance: {variance:0.3f} to image (aka RDNOISE={rdnoise:0.3f} ADU).")
     return image
 
 
@@ -71,7 +79,7 @@ def subtract_offset_image(image: Image) -> Image:
     image = image.copy()
     # ComputeLinesMean from overscan.cxx:202 iterates over every Y value
     # in the bias section and sums across X axis to compute the mean
-    _, bias_data, _ = image.get_bias_section()
+    bias_section, bias_data, _ = image.get_bias_section()
     mean = np.mean(bias_data, axis=0)
 
     # To compute the variance, the RMS is loaded from the RDNOISE header value
@@ -99,28 +107,33 @@ def subtract_offset_image(image: Image) -> Image:
     #! first few pixels, great
     column_variance /= 3 * (window_size + 2)
 
-    # TODO: implement the subtract ramp function
     # Now that we have the medians and the variance, overscan.cxx:83. SubstractRamp is called
     # This algorithm makes a ramp between left and right overscans
     # I note that the first pixel of the medians (due to window effects) is trash and should not be used
     # There's a "line zero" which according to a comment is (S->X1()+S->X2())/2.0+1+Nx() where S is biassec region
-    x_length = bias_data.shape[0]
     line_length = image.data.shape[0]
-    line_zero = int(x_length // 2 + 1 + x_length)
+    line_zero = 0.5 * (bias_section.x_min + bias_section.x_max + 1) - 1
     # below is overscan.cxx:128 and 131
     multiplier = (medians[1:] - medians[:-1]) / line_length
-    offset = ((medians[1:] - medians[:-1]) * (line_length - line_zero) / line_length) + 2 * medians[:-1] - medians[1:]
+    offset = medians[:-1] + (medians[1:] - medians[:-1]) * (line_length - line_zero) / line_length
+
+    # The above gives us N-1 values, but we need N. Because we cant look before the 0 pixel,
+    # we need to insert some estimated values at 0.
 
     # For the first pixel, we want add = value and multipler = 0 (overscan.cxx:108)
-    multiplier = np.insert(multiplier, 0, 0)
-    offset = np.insert(offset, 0, medians[0])
+    multiplier = np.insert(multiplier, 0, (medians[1] - medians[0]) / line_length)
+    offset = np.insert(
+        offset, 0, (medians[1] - medians[0]) * (line_length - line_zero) / line_length + 2 * medians[0] - medians[1]
+    )
 
     # Now the bias section is actually smaller than the full data (its 4096 columns, the full data is 4128)
     # To handle this, we zero pad the multiplier at the end, and duplicate the final offset value
-    multiplier = np.pad(multiplier, (0, image.data.shape[1] - len(multiplier)), mode="constant", constant_values=0)
-    offset = np.pad(offset, (0, image.data.shape[1] - len(offset)), mode="edge")
+    # multiplier = np.pad(multiplier, (0, image.data.shape[1] - len(multiplier)), mode="constant", constant_values=0)
+    # offset = np.pad(offset, (0, image.data.shape[1] - len(offset)), mode="edge")
 
-    correction = np.arange(line_length)[:, None] @ multiplier[None, :] + offset[None, :]
+    correction = (
+        np.repeat(np.arange(line_length)[:, None], multiplier.size, axis=1) * multiplier[None, :] + offset[None, :]
+    )
     image.data -= correction
 
     # The variance is just a constant value (apart from at the window boundary technically)
@@ -132,13 +145,14 @@ def subtract_offset_image(image: Image) -> Image:
         image.header["BIASFRAM"] = 1
 
     # Save out the median medians to the header for posterity
-    image.header["OVSCMED"] = float(np.median(medians))
-
-    max_overscan = max(np.max(medians), (2 * medians[0]) - medians[1])
+    overscan_median = float(np.median(medians))
+    max_overscan = float(max(np.max(medians), (2 * medians[0]) - medians[1]))
     # ^ Don't ask me why it also compares to double the first difference.
-    image.header["OVSCMAX"] = float(max_overscan)
+    image.header["OVSCMED"] = overscan_median
+    image.header["OVSCMAX"] = max_overscan
+    get_logger().info(f"Applied overscan correction: median={overscan_median:0.4f}, max={max_overscan:0.4f} to image.")
 
     return image
 
 
-subtract_offset = plot()(pipeline_task()(listify(subtract_offset_image)))
+subtract_offset = plot_bias()(plot()(pipeline_task()(listify(subtract_offset_image))))

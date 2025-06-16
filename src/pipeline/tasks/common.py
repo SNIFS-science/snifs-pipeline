@@ -283,6 +283,15 @@ class Image(BaseModel):
     def subtract(self, image: "Image", scale: float = 1.0) -> "Image":
         return self.add(image, scale=-scale)
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Image):
+            return NotImplemented
+        return (
+            np.array_equal(self.data, other.data)
+            and np.array_equal(self.variance, other.variance)
+            and self.header == other.header
+        )
+
     @classmethod
     def from_array_and_dict(
         cls,
