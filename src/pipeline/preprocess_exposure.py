@@ -8,14 +8,12 @@ from pipeline.resolver.common import FileType
 from pipeline.tasks.build_filestore import FlowConfig
 from pipeline.tasks.common import Image
 from pipeline.tasks.preprocessing import (
-    add_poisson_noise_to_variance,
     build_bichip_from_fits,
     plot_images,
 )
 from pipeline.tasks.preprocessing.bichips import BiChip, handle_saturation
 from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
 from pipeline.tasks.preprocessing.common import ensure_float64
-from pipeline.tasks.preprocessing.cosmetics import handle_cosmetics
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
 from pipeline.tasks.preprocessing.plots import clear_output_path, plot, plot_bias_sections
 
@@ -65,7 +63,7 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     images = add_overscan_variance(images)
     images = subtract_offset(images)
     chip = BiChip(primary_headers=primary_headers, images=images).assemble()
-    chip.image = add_poisson_noise_to_variance(chip.image)
+    # chip.image = add_poisson_noise_to_variance(chip.image)
 
     # if config.prefer_bias_image_over_model:
     #     bias_reference = Image.from_fits_file(config.bias_image_file, transpose=True)
@@ -80,7 +78,7 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     #     dark_images = Image.stack_from_fits_file(config.dark_image_file, transpose=True)
     # chip.image = subtract_dark(chip.image, dark_model, dark_images, chip.primary_headers)
 
-    chip.image = handle_cosmetics(chip.image, chip.primary_headers)
+    # chip.image = handle_cosmetics(chip.image, chip.primary_headers)
     chip.image = debug_comparison(chip.image, chip.primary_headers.get_str("CHANNEL"))
     plot_bias_sections(primary)
     plot_images(primary)

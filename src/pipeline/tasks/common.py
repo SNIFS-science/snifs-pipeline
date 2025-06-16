@@ -153,30 +153,30 @@ class Section(BaseModel):
             y_dir=self.y_dir * other.y_dir,
         )
 
-
-def get_section_range(label: str) -> Section:
-    """There is a header convention in fits files that defines a data range"""
-    x_min, x_max, y_min, y_max = [int(i) for i in label[1:-1].replace(":", ",").split(",")]
-    x_dir, y_dir = 1, 1
-    if x_max < x_min:
-        x_dir = -1
-        x_min, x_max = x_max, x_min
-    if y_max < y_min:
-        y_dir = -1
-        y_min, y_max = y_max, y_min
-    return Section(
-        x_min=x_min - 1,
-        x_max=x_max,
-        x_dir=x_dir,
-        y_min=y_min - 1,
-        y_max=y_max,
-        y_dir=y_dir,
-    )
+    @classmethod
+    def from_str(cls, label: str) -> "Section":
+        """There is a header convention in fits files that defines a data range"""
+        x_min, x_max, y_min, y_max = [int(i) for i in label[1:-1].replace(":", ",").split(",")]
+        x_dir, y_dir = 1, 1
+        if x_max < x_min:
+            x_dir = -1
+            x_min, x_max = x_max, x_min
+        if y_max < y_min:
+            y_dir = -1
+            y_min, y_max = y_max, y_min
+        return cls(
+            x_min=x_min - 1,
+            x_max=x_max,
+            x_dir=x_dir,
+            y_min=y_min - 1,
+            y_max=y_max,
+            y_dir=y_dir,
+        )
 
 
 def extract_section_from_label(pixels: np.ndarray, label: str) -> np.ndarray:
     """Extract a section from the pixels array based on the label."""
-    section = get_section_range(label)
+    section = Section.from_str(label)
     return extract_section(pixels, section)
 
 
@@ -220,7 +220,7 @@ class Image(BaseModel):
             if enforce_datasec:
                 raise ValueError("DATASEC is not set in the header")
             return None
-        return get_section_range(data_section)
+        return Section.from_str(data_section)
 
     def get_data_section(self, enforce_datasec: bool = True) -> np.ndarray:
         section = self.get_data_section_limits(enforce_datasec=enforce_datasec)
@@ -258,13 +258,13 @@ class Image(BaseModel):
 
     def get_bias_section(self) -> tuple[Section, np.ndarray, np.ndarray]:
         bias_section_str = self.header.get_str("BIASSEC")
-        bias_section = get_section_range(bias_section_str)
+        bias_section = Section.from_str(bias_section_str)
         data, var = self.get_section(bias_section)
         return bias_section, data, var
 
     def get_ccd_section(self) -> tuple[Section, np.ndarray, np.ndarray]:
         ccd_section_str = self.header.get_str("CCDSEC")
-        ccd_section = get_section_range(ccd_section_str)
+        ccd_section = Section.from_str(ccd_section_str)
         data, var = self.get_section(ccd_section)
         return ccd_section, data, var
 

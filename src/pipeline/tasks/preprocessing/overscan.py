@@ -88,8 +88,8 @@ def subtract_offset_image(image: Image) -> Image:
     # NOTE: this is a red herring - the value does not come from the instrument,
     # but RDNOISE is set in the prior AddOverscanVariance function. It's just the average
     # RMS noise of the bias section
-    assert "RDNOISE" in image.header, "RDNOISE header value not set. It should be set in Add add_overscan_variance."
-    column_variance = image.header.get_float("RDNOISE", 0.0) ** 2 / bias_data.shape[1]
+    # assert "RDNOISE" in image.header, "RDNOISE header value not set. It should be set in Add add_overscan_variance."
+    # column_variance = image.header.get_float("RDNOISE", 0.0) ** 2 / bias_data.shape[1]
 
     # Now turning to ImproveLinesMedian in overscan.cxx:296, we have an array of means
     # and variances, and it seems the algorithm uses a median filter on those arrays
@@ -106,35 +106,26 @@ def subtract_offset_image(image: Image) -> Image:
     # where N are the number of pixels in the window.
     #! TODO: Check in with Greg about the spaxel locations. If we dont have to worry about the
     #! first few pixels, great
-    column_variance /= 3 * (window_size + 2)
+    # column_variance /= 3 * (window_size + 2)
 
     # Now that we have the medians and the variance, overscan.cxx:83. SubstractRamp is called
     # This algorithm makes a ramp between left and right overscans
     # I note that the first pixel of the medians (due to window effects) is trash and should not be used
-    # There's a "line zero" which according to a comment is (S->X1()+S->X2())/2.0+1+Nx() where S is biassec region
     line_length = image.data.shape[0]
-    line_zero = 0.5 * (bias_section.x_min + bias_section.x_max + 1) - 1
-    # below is overscan.cxx:128 and 131
-    multiplier = (medians[1:] - medians[:-1]) / line_length
-    offset = medians[:-1] + (medians[1:] - medians[:-1]) * (line_length - line_zero) / line_length
-
-    # The above gives us N-1 values, but we need N. Because we cant look before the 0 pixel,
-    # we need to insert some estimated values at 0.
-
-    # For the first pixel, we want add = value and multipler = 0 (overscan.cxx:108)
-    multiplier = np.insert(multiplier, 0, (medians[1] - medians[0]) / line_length)
-    offset = np.insert(
-        offset, 0, (medians[1] - medians[0]) * (line_length - line_zero) / line_length + 2 * medians[0] - medians[1]
-    )
-
-    # Now the bias section is actually smaller than the full data (its 4096 columns, the full data is 4128)
-    # To handle this, we zero pad the multiplier at the end, and duplicate the final offset value
-    # multiplier = np.pad(multiplier, (0, image.data.shape[1] - len(multiplier)), mode="constant", constant_values=0)
-    # offset = np.pad(offset, (0, image.data.shape[1] - len(offset)), mode="edge")
-
-    correction = (
-        np.repeat(np.arange(line_length)[:, None], multiplier.size, axis=1) * multiplier[None, :] + offset[None, :]
-    )
+    line_zero = 0.5 * (bias_section.x_min + bias_section.x_max + 1)
+    # Correction for chip edges
+    offset_edge = np.insert(medians[1:], medians.size - 1, medians[-1])
+    offset_centre = medians
+    # If interpolating, we're really interpolating from one bias section midpoint to the next.
+    # Ie if the midpoint was 80% of the way through, [xxxxxxxMxx] then out lerp (uncaring about points in the
+    # the biassec after the midpoint) would be: [0.2 ... 1.0, 1.0, 1.0]
+    # This is because the offset_centre is defined from the middle of the bias section, not the edge of the CCD
+    # So if the middle of the bias section represents 90% of the way through the row, we'd want want to use
+    start = (line_length - line_zero + 1) / line_length
+    end = line_length / line_zero
+    lerp = np.clip(np.linspace(start, end, line_length), 0, 1)
+    index = np.repeat(lerp[:, None], medians.size, axis=1)
+    correction = offset_edge * (1 - index) + offset_centre * index
     image.data -= correction
 
     # The variance is just a constant value (apart from at the window boundary technically)

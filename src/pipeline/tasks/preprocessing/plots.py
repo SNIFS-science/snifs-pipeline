@@ -1,4 +1,3 @@
-import shutil
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
@@ -15,14 +14,14 @@ from pipeline import settings
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_task
 from pipeline.resolver.common import FileStoreEntry
-from pipeline.tasks.common import Image, Section, get_section_range
+from pipeline.tasks.common import Image, Section
 
 _IMAGE_STORE: dict[str, list[Image]] = OrderedDict()
 _BIAS_STORE: dict[str, list[Image]] = OrderedDict()
 
 P = ParamSpec("P")
 R = TypeVar("R")
-ZOOM_START = (1024 + 32 - 100, 512)
+ZOOM_START = (1024 - 110, 512)
 ZOOM_SIZE = (100, 100)
 ZOOM_END = (ZOOM_START[0] + ZOOM_SIZE[0], ZOOM_START[1] + ZOOM_SIZE[1])
 MIDLINE_X_COORD = ZOOM_START[0] + ZOOM_SIZE[0] // 2
@@ -33,17 +32,15 @@ MIDLINE_VERTICAL_COLOUR = "#755028"
 # I love the tailwind colours, and you can get them from the tailwind site
 # or this fun tool: https://tailscan.com/colors
 LINES_X: dict[int, str] = {
-    6: "#e4e23b",
+    7: "#e4e23b",
     1022: "#9f1239",
     1032: "#d97706",
 }
 LINES_Y: dict[int, str] = {
-    10: "#86198f",
-    # 512: "#86198f",
-    # 1024: "#22c55e",
-    # 1536: "#0e7490",
-    # 2048: "#fb7185",
-    4090: "#fb7185",
+    128: "#601d37",
+    1536: "#0e7490",
+    2048: "#fb7185",
+    4090: "#ffafbb",
 }
 CMAP_DATA = cmr.torch
 CMAP_ZOOM = cmr.rainforest
@@ -54,7 +51,7 @@ def clear_output_path(primary: FileStoreEntry) -> None:
     """Clear the output path for the given primary file."""
     output_path = determine_output_path(primary)
     if output_path.exists():
-        shutil.rmtree(output_path, ignore_errors=True)  # type: ignore
+        [f.unlink() for f in output_path.glob("*") if f.is_file()]
         get_logger().info(f"Cleared output path: {output_path}")
 
 
@@ -155,11 +152,11 @@ def add_ticks(ax: plt.Axes, locations: dict[int, str], axis: str = "y", reach: f
     # Matplotlib won't let you do different coloured ticks, so we'll do it ourselves.
     for location, colour in locations.items():
         if axis == "y":
-            ax.axhline(location, xmin=0, xmax=reach, color=colour)
-            ax.axhline(location, xmin=(1 - reach), xmax=1, color=colour)
+            ax.axhline(location, xmin=0, xmax=reach, color=colour, lw=0.5)
+            ax.axhline(location, xmin=(1 - reach), xmax=1, color=colour, lw=0.5)
         elif axis == "x":
-            ax.axvline(location, ymin=0, ymax=reach, color=colour)
-            ax.axvline(location, ymin=(1 - reach), ymax=1, color=colour)
+            ax.axvline(location, ymin=0, ymax=reach, color=colour, lw=0.5)
+            ax.axvline(location, ymin=(1 - reach), ymax=1, color=colour, lw=0.5)
 
 
 def add_midlines(ax: plt.Axes) -> None:  # type: ignore
@@ -308,24 +305,34 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
                 add_callout_rectangle(ax)
                 if "BIASSEC" in image.header:
                     # TODO: Make this class constructor
-                    bias_section = get_section_range(image.header.get_str("BIASSEC"))
+                    bias_section = image.get_bias_section()[0]
                     add_section_rectangle(ax, bias_section, edgecolor="#38bdf8", linestyle=":")
 
             # Now we add some line plots for better readability
-            kwargs = {"lw": 0.5}
+            kwargs = {"lw": 0.3, "alpha": 0.7}
             y_lim_percentages = [1, 99]
             for ax, sec in [(axxdl, data), (axxvl, variance), (axxddl, data_diff), (axxvdl, variance_diff)]:
                 for location, colour in LINES_X.items():
                     ax.plot(sec[location, :], color=colour, **kwargs)
 
                 dx = sec[list(LINES_X.keys()), :]
-                ax.set_ylim(*np.nanpercentile(dx, y_lim_percentages))
+                ymin, ymax = np.nanpercentile(dx, y_lim_percentages)
+                if abs(ymin) < 1e-4:
+                    ymin -= 0.02 * (ymax - ymin)
+                if abs(ymax) < 1e-4:
+                    ymax += 0.02 * (ymax - ymin)
+                ax.set_ylim(ymin, ymax)
 
             for ax, sec in [(axydl, data), (axyvl, variance), (axyddl, data_diff), (axyvdl, variance_diff)]:
                 for location, colour in LINES_Y.items():
                     ax.plot(sec[:, location], color=colour, **kwargs)
                 dy = sec[:, list(LINES_Y.keys())]
-                ax.set_ylim(*np.nanpercentile(dy, y_lim_percentages))
+                ymin, ymax = np.nanpercentile(dy, y_lim_percentages)
+                if abs(ymin) < 1e-4:
+                    ymin -= 0.02 * (ymax - ymin)
+                if abs(ymax) < 1e-4:
+                    ymax += 0.02 * (ymax - ymin)
+                ax.set_ylim(ymin, ymax)
 
             # We also want to add the midlines to the midline axes
             for ax, sec in [(axxc, data), (axyc, variance), (axxcd, data_diff), (axycd, variance_diff)]:
@@ -368,7 +375,7 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
             axxvdl.set_xlabel("ΔVariance columns", fontsize=8)
         output_location = output_path / f"{i}_{key}.png"
         logger.info(f"Saving plot to {output_location}")
-        fig.savefig(output_location, dpi=450, bbox_inches="tight")
+        fig.savefig(output_location, dpi=900, bbox_inches="tight")
         plt.close(fig)
 
         prior_images = images

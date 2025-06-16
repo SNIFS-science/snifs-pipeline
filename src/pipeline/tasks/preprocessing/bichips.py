@@ -150,7 +150,7 @@ def split_chip(images: list[Image]) -> list[Image]:
             # EDIT: Actually, going off the comment both detcom and otcom want 10 columns dropped?
             # comment: remove a few pixels (10)
             b, _, _ = image.get_bias_section()
-            image.header["BIASSEC"] = f"[{b.x_min + 11}:{b.x_max},{b.y_min + 1}:{b.y_max}]"
+            image.header["BIASSEC"] = f"[{b.x_min + 10}:{b.x_max},{b.y_min + 1}:{b.y_max}]"
 
         return images
     image = images[0]
