@@ -21,11 +21,12 @@ def correct_even_odd_image(image: Image) -> Image:
     data = data.astype(np.float64)
 
     # NaN out points that are more than 3 sigma away from the global median and 10-90th std
-    median = np.median(data)
-    minv, maxv = np.percentile(data, [10, 90])
-    std_dev = np.std(data[(data > minv) & (data < maxv)], axis=0)
-    mask = np.abs(data - median) < 3 * std_dev
-    data[~mask] = np.nan
+    # TODO: I feel like we'd want to pull this back in because there are outliers that bias the subtraction
+    # median = np.median(data)
+    # minv, maxv = np.percentile(data, [10, 90])
+    # std_dev = np.std(data[(data > minv) & (data < maxv)], axis=0)
+    # mask = np.abs(data - median) < 3 * std_dev
+    # data[~mask] = np.nan
 
     odd_differences = data[:-1:2, :] - data[1::2, :]
     odd_means = np.nanmean(odd_differences, axis=0).flatten()

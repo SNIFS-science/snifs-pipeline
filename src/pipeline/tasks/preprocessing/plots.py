@@ -33,7 +33,7 @@ MIDLINE_VERTICAL_COLOUR = "#755028"
 # I love the tailwind colours, and you can get them from the tailwind site
 # or this fun tool: https://tailscan.com/colors
 LINES_X: dict[int, str] = {
-    2: "#e4e23b",
+    6: "#e4e23b",
     1022: "#9f1239",
     1032: "#d97706",
 }
