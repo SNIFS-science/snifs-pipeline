@@ -10,7 +10,8 @@ from pipeline.tasks.common import Image, load_all_data_extensions_with_headers, 
 from pipeline.tasks.preprocessing import plot_images
 from pipeline.tasks.preprocessing.bichips import assemble_bichip_to_image, handle_saturation, split_and_standardise
 from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
-from pipeline.tasks.preprocessing.common import ensure_float64
+from pipeline.tasks.preprocessing.common import add_poisson_noise_to_variance, ensure_float64
+from pipeline.tasks.preprocessing.models import DarkModel, subtract_bias
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
 from pipeline.tasks.preprocessing.plots import clear_output_path, plot
 
@@ -65,13 +66,13 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     images = add_overscan_variance(images)
     images = subtract_offset(images)
     image, primary_headers = assemble_bichip_to_image(images, primary_headers)
-    # image = add_poisson_noise_to_variance(image)
+    image = add_poisson_noise_to_variance(image)
 
-    # if config.prefer_bias_image_over_model:
-    #     bias_reference = Image.from_fits_file(config.bias_image_file, transpose=True)
-    # else:
-    #     bias_reference = DarkModel.model_validate_json(config.bias_model_file.read_text())
-    # chip.image = subtract_bias(chip.image, bias_reference, chip.primary_headers)
+    if config.prefer_bias_image_over_model:
+        bias_reference = Image.from_fits_file(config.bias_image_file, transpose=True)
+    else:
+        bias_reference = DarkModel.model_validate_json(config.bias_model_file.read_text())
+    image = subtract_bias(image, bias_reference, primary_headers)
 
     # The darks can use a model with a stacked image, so it's not either or.
     # dark_model = DarkModel.model_validate_json(config.dark_model_file.read_text())

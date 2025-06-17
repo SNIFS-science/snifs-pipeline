@@ -105,28 +105,28 @@ def correct_binary_offset(images: list[Image], bom_path: Path) -> list[Image]:
     # variable names. I don't know what they mean, and the original code is not
     # very clear either.
 
-    driver_2 = images[0].data[:, 1:-2]
-    driver_3 = images[0].data[:, :-3]
-    driver_other_2 = images[1].data[:, 1:-2]
-    driver_other_3 = images[1].data[:, :-3]
+    driver_2 = images[0].data[1:-2, :]
+    driver_3 = images[0].data[:-3, :]
+    driver_other_2 = images[1].data[1:-2, :]
+    driver_other_3 = images[1].data[:-3, :]
     correction = get_correction_amplitude(driver_2, driver_3, driver_other_3, parameters[0])
     correction_other = get_correction_amplitude(driver_other_2, driver_other_3, driver_3, parameters[1])
 
     # The BOM doesnt work for the first three columns of data so it seems the original algorithm
     # determines a mean correction for the rest of the row and applies that mean to first three columns
-    row_mean = np.mean(correction, axis=1)[:, None]
-    row_mean_other = np.mean(correction_other, axis=1)[:, None]
+    column_means = np.mean(correction, axis=0)[None, :]
+    column_mean_other = np.mean(correction_other, axis=0)[None, :]
 
     # Before we set anything, copy the original data images and set their data type to float64
     # This is because the correction is not integer, and we don't want to lose precision
     images = [image.copy(type_coercion=np.float64) for image in images]
 
     # Initial correction works for all but the first three columns
-    images[0].data[:, 3:] -= correction
-    images[1].data[:, 3:] -= correction_other
+    images[0].data[3:, :] -= correction
+    images[1].data[3:, :] -= correction_other
     # The first three columns are corrected with the mean
-    images[0].data[:, :3] -= row_mean
-    images[1].data[:, :3] -= row_mean_other
+    images[0].data[:3, :] -= column_means
+    images[1].data[:3, :] -= column_mean_other
 
     return images
 
