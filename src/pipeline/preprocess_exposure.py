@@ -58,6 +58,7 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
 
     if len(images) == 2:  # Binary offset model is only derived for 2 chip models.
         images = correct_binary_offset(images, config.binary_offset_model_file)
+        pass
 
     images = ensure_float64(images)
     images = correct_even_odd(images)

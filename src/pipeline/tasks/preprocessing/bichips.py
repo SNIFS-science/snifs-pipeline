@@ -44,11 +44,9 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> t
     if channel == "R":
         datas = datas[::-1]
         variances = variances[::-1]
-        # datas[1] = datas[1][:, ::-1]
-        # variances[1] = variances[1][:, ::-1]
 
     # If not R channel, flip the first amplifier in the X direction
-    else:
+    if channel != "R":
         datas[0] = datas[0][::-1, :]
         variances[0] = variances[0][::-1, :]
 
@@ -100,7 +98,7 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> t
     return final_image, primary_headers
 
 
-# @plot()
+@plot()
 @pipeline_task()
 def split_and_standardise(images: list[Image]) -> list[Image]:
     """Detcom (blue) comes in 2 extensions, one for each amplifier.
@@ -124,7 +122,7 @@ def split_and_standardise(images: list[Image]) -> list[Image]:
 
         return images
     image = images[0]
-    new_data_headers = []
+    new_images = []
     num_amps = image.header.get_int("CCDNAMP", 2)
     assert num_amps == 2, f"Expected 2 amplifiers, got {num_amps}"
     full_data = image.get_data_section()  # TODO: standardise this
@@ -167,11 +165,9 @@ def split_and_standardise(images: list[Image]) -> list[Image]:
             ),
             "CCDNUM": i,
         }
-        new_data_headers.append(
-            Image.from_array_and_dict(chip_header, combined, np.zeros_like(combined, dtype=np.float64))
-        )
+        new_images.append(Image.from_array_and_dict(chip_header, combined, np.zeros_like(combined, dtype=np.float64)))
 
-    return new_data_headers  # R channel has chips reversed
+    return new_images
 
 
 # @plot()

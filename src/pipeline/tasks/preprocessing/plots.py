@@ -194,6 +194,17 @@ def add_midlines(ax: plt.Axes) -> None:  # type: ignore
     ax.set_ymargin(0)
 
 
+def get_vrange(data: np.ndarray) -> tuple[float, float]:
+    if np.std(data) < 1e-6:
+        return float(np.min(np.abs(data))), float(np.max(np.abs(data)))
+    vmin, vmax = np.nanpercentile(data, [1, 99])
+    if np.sign(vmin) != np.sign(vmax):
+        # If the min and max are of different signs, we need to adjust the range so zero is white
+        vmin = min(vmin, -np.abs(vmax))
+        vmax = max(vmax, np.abs(vmin))
+    return vmin, vmax
+
+
 @pipeline_task()
 def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
     # TODO: full image run id, type, channel on image itself
@@ -291,17 +302,8 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
             vdmin, vdmax, vvmin, vvmax = None, None, None, None
             # if there is a constant difference (within rounding issues) we want the vmin and vmax to be set to the
             # maxabs and minabs so we don't get white images that people may confuse with zero-change deltas
-            if np.std(data_diff) < 1e-5:
-                vdmin = np.min(np.abs(data_diff))
-                vdmax = np.max(np.abs(data_diff))
-            else:
-                vdmin, vdmax = np.nanpercentile(data_diff, [1, 99])
-            if np.std(variance_diff) < 1e-5:
-                vvmin = np.min(np.abs(variance_diff))
-                vvmax = np.max(np.abs(variance_diff))
-            else:
-                vvmin, vvmax = np.nanpercentile(variance_diff, [1, 99])
-
+            vdmin, vdmax = get_vrange(data_diff)
+            vvmin, vvmax = get_vrange(variance_diff)
             imdd = axdd.imshow(data_diff.T, cmap=CMAP_DIFF, aspect="equal", vmin=vdmin, vmax=vdmax, **im_kw)
             add_colorbar("ΔData", fig, axdd, imdd)
             imvd = axvd.imshow(variance_diff.T, cmap=CMAP_DIFF, aspect="equal", vmin=vvmin, vmax=vvmax, **im_kw)
