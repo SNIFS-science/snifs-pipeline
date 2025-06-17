@@ -5,11 +5,15 @@ from scipy.stats import linregress
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_task
 from pipeline.tasks.common import Image, flag_skip, listify
-from pipeline.tasks.preprocessing.plots import plot, plot_bias
+from pipeline.tasks.preprocessing.plots import plot_bias
 
 
+@plot_bias()
+# @plot()
+@pipeline_task()
+@listify
 @flag_skip("OEPARAM")
-def correct_even_odd_image(image: Image) -> Image:
+def correct_even_odd(image: Image) -> Image:
     """The odd-even effect is touched on in Emmanual Gangler's thesis, section 3.3.2
     which you can find in the docs/pdfs folder in this repository."""
     image = image.copy()
@@ -56,11 +60,12 @@ def correct_even_odd_image(image: Image) -> Image:
     return image
 
 
-correct_even_odd = plot_bias()(plot()(pipeline_task()(listify(correct_even_odd_image))))
-
-
+@plot_bias()
+# @plot()
+@pipeline_task()
+@listify
 @flag_skip("OVSCNOIS")
-def add_overscan_variance_image(image: Image) -> Image:
+def add_overscan_variance(image: Image) -> Image:
     logger = get_logger()
     image = image.copy()
     _, var, _ = image.get_bias_section()
@@ -72,11 +77,12 @@ def add_overscan_variance_image(image: Image) -> Image:
     return image
 
 
-add_overscan_variance = plot()(pipeline_task()(listify(add_overscan_variance_image)))
-
-
+@plot_bias()
+# @plot()
+@pipeline_task()
+@listify
 @flag_skip("OVSCDONE")
-def subtract_offset_image(image: Image) -> Image:
+def subtract_offset(image: Image) -> Image:
     image = image.copy()
     # ComputeLinesMean from overscan.cxx:202 iterates over every Y value
     # in the bias section and sums across X axis to compute the mean
@@ -126,6 +132,16 @@ def subtract_offset_image(image: Image) -> Image:
     lerp = np.clip(np.linspace(start, end, line_length), 0, 1)
     index = np.repeat(lerp[:, None], medians.size, axis=1)
     correction = offset_edge * (1 - index) + offset_centre * index
+
+    if correction.shape[1] < image.data.shape[1]:
+        # We've got extra rows, fun fun fun.
+        start_rows = bias_section.y_min
+        end_rows = image.data.shape[1] - bias_section.y_max
+        if start_rows > 0:
+            correction = np.concatenate([np.repeat(correction[:, 0:1], start_rows, axis=1), correction], axis=1)
+        if end_rows > 0:
+            correction = np.concatenate([correction, np.repeat(correction[:, -1:], end_rows, axis=1)], axis=1)
+
     image.data -= correction
 
     # The variance is just a constant value (apart from at the window boundary technically)
@@ -145,6 +161,3 @@ def subtract_offset_image(image: Image) -> Image:
     get_logger().info(f"Applied overscan correction: median={overscan_median:0.4f}, max={max_overscan:0.4f} to image.")
 
     return image
-
-
-subtract_offset = plot_bias()(plot()(pipeline_task()(listify(subtract_offset_image))))

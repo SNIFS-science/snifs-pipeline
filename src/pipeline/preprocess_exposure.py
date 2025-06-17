@@ -6,16 +6,13 @@ from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.resolver.common import FileType
 from pipeline.tasks.build_filestore import FlowConfig
-from pipeline.tasks.common import Image
-from pipeline.tasks.preprocessing import (
-    build_bichip_from_fits,
-    plot_images,
-)
-from pipeline.tasks.preprocessing.bichips import BiChip, handle_saturation
+from pipeline.tasks.common import Image, load_all_data_extensions_with_headers, load_headers
+from pipeline.tasks.preprocessing import plot_images
+from pipeline.tasks.preprocessing.bichips import assemble_bichip_to_image, handle_saturation, split_and_standardise
 from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
 from pipeline.tasks.preprocessing.common import ensure_float64
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
-from pipeline.tasks.preprocessing.plots import clear_output_path, plot, plot_bias_sections
+from pipeline.tasks.preprocessing.plots import clear_output_path, plot
 
 
 class PreprocessExposure(FlowConfig):
@@ -37,8 +34,8 @@ def debug_comparison(image: Image, channel: str) -> Image:
 
     # 005 and 006 are R and B continuum
     # 011 are the arcs
-    # file_name = "P25_057_001_005_07_R.fits" if channel == "R" else "P25_057_001_006_07_B.fits"
-    file_name = "P25_159_030_005_07_R.fits" if channel == "R" else "P25_057_001_006_07_B.fits"
+    file_name = "P25_057_001_005_07_R.fits" if channel == "R" else "P25_057_001_006_07_B.fits"
+    # file_name = "P25_159_030_005_07_R.fits" if channel == "R" else "P25_057_001_006_07_B.fits"
     dan = Image.from_fits_file(Path(__file__).parents[2] / f".data_dump/{file_name}", transpose=True)
     dan.variance[dan.variance > 1e6] = np.inf
     return dan
@@ -47,23 +44,27 @@ def debug_comparison(image: Image, channel: str) -> Image:
 @pipeline_flow()
 def preprocess_exposure(config: PreprocessExposure) -> None:
     logger = get_logger()
-    primary = config.metadata(config.primary_file)
+    primary = config.fetch_metadata(config.primary_file)
     logger.info(f"Starting preprocessing with settings:\n{config.model_dump_json(indent=2)}\n")
     logger.info(f"Primary file:\n{primary.model_dump_json(indent=2)}\n")
+    assert primary.channel is not None, "Primary file must have a channel defined in the headers."
     clear_output_path(primary)
 
-    primary_headers, images = build_bichip_from_fits(config.primary_file)
+    # Start the preprocessing pipeline
+    images = load_all_data_extensions_with_headers(config.primary_file, transpose=True)
+    primary_headers = load_headers(config.primary_file)
+    images = split_and_standardise(images)
     images = handle_saturation(images)
 
-    if len(images) == 2 and False:  # Binary offset model is only derived for 2 chip models.
+    if len(images) == 2:  # Binary offset model is only derived for 2 chip models.
         images = correct_binary_offset(images, config.binary_offset_model_file)
 
     images = ensure_float64(images)
     images = correct_even_odd(images)
     images = add_overscan_variance(images)
     images = subtract_offset(images)
-    chip = BiChip(primary_headers=primary_headers, images=images).assemble()
-    # chip.image = add_poisson_noise_to_variance(chip.image)
+    image, primary_headers = assemble_bichip_to_image(images, primary_headers)
+    # image = add_poisson_noise_to_variance(image)
 
     # if config.prefer_bias_image_over_model:
     #     bias_reference = Image.from_fits_file(config.bias_image_file, transpose=True)
@@ -78,16 +79,17 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     #     dark_images = Image.stack_from_fits_file(config.dark_image_file, transpose=True)
     # chip.image = subtract_dark(chip.image, dark_model, dark_images, chip.primary_headers)
 
-    # chip.image = handle_cosmetics(chip.image, chip.primary_headers)
-    chip.image = debug_comparison(chip.image, chip.primary_headers.get_str("CHANNEL"))
-    plot_bias_sections(primary)
+    # if primary.channel == "R":
+    #     image = handle_special_red_cosmetics(image, primary_headers)
+    image = debug_comparison(image, primary.channel)
+    # plot_bias_sections(primary)
     plot_images(primary)
 
 
 if __name__ == "__main__":
     # file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_121_118/bias_red.fits"
-    # file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_red.fits"
-    file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_159_030/continuum_red.fits"
+    file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_red.fits"
+    # file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_159_030/continuum_red.fits"
     # file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_blue.fits"
     config = PreprocessExposure(primary_file=file)
     preprocess_exposure(config)

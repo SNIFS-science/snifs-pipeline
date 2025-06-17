@@ -57,7 +57,7 @@ class FlowConfig(BaseSettings):
 
         return build_filestore(refresh=getattr(self, "refresh_filestore", False))
 
-    def metadata(self, path: Path) -> FileStoreEntry:
+    def fetch_metadata(self, path: Path) -> FileStoreEntry:
         return self.resolver.get_file_metadata(path)
 
     model_config = SettingsConfigDict(cli_parse_args=True)

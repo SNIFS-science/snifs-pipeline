@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import OrderedDict, ParamSpec, TypeVar
+from typing import Any, OrderedDict, ParamSpec, TypeVar
 
 import cmasher as cmr
 import matplotlib.patches as patches
@@ -72,11 +72,27 @@ def determine_figure_prefix(primary: FileStoreEntry) -> str:
     return f"{obstype=} - {run_id=} - {channel=}"
 
 
-def ensure_list[T](x: T | list[T]) -> list[T]:
+def ensure_list[T](x: T | list[T] | tuple[T]) -> list[T]:
     """Ensure that the input is a list."""
     if isinstance(x, list):
         return x
+    elif isinstance(x, tuple):
+        return list(x)
     return [x]
+
+
+def flatten_and_filter[T](inputs: Any, filter_type: type[T]) -> list[T]:
+    """Flatten a nested structure and filter out elements of a specific type."""
+    if isinstance(inputs, (list, tuple)):
+        return [
+            item
+            for sublist in inputs
+            for item in flatten_and_filter(sublist, filter_type)
+            if isinstance(item, filter_type)
+        ]
+    elif isinstance(inputs, filter_type):
+        return [inputs]
+    return []
 
 
 def plot():
@@ -84,9 +100,9 @@ def plot():
         @wraps(func)
         def inner(images: Image | list[Image], *args, **kwargs) -> Image | list[Image]:
             if not _IMAGE_STORE:
-                _IMAGE_STORE["initial"] = ensure_list(images)
+                _IMAGE_STORE["initial"] = flatten_and_filter(images, Image)
             result = func(images, *args, **kwargs)  # type: ignore
-            _IMAGE_STORE[func.__name__] = ensure_list(result)
+            _IMAGE_STORE[func.__name__] = flatten_and_filter(result, Image)
             return result
 
         return inner  # type: ignore
@@ -375,7 +391,7 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
             axxvdl.set_xlabel("ΔVariance columns", fontsize=8)
         output_location = output_path / f"{i}_{key}.png"
         logger.info(f"Saving plot to {output_location}")
-        fig.savefig(output_location, dpi=900, bbox_inches="tight")
+        fig.savefig(output_location, dpi=450, bbox_inches="tight")
         plt.close(fig)
 
         prior_images = images

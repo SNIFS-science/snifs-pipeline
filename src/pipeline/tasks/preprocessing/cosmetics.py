@@ -32,6 +32,8 @@ SPECIAL_CONSERVATIVE = 2
 SPECIAL_ERROR_FAST = 0.18
 
 
+@plot()
+@pipeline_task()
 def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Image:  # noqa: C901
     """Please don't ever ask me why anything in this function is the way it is."""
     logger = get_logger()
@@ -142,6 +144,8 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
     return image
 
 
+# @plot()
+@pipeline_task()
 def cheat_cosmetics(image: Image, channel: str) -> Image:
     image = image.copy()
     # Turns out the bad sections are relative to the ccd section
@@ -166,18 +170,4 @@ def cheat_cosmetics(image: Image, channel: str) -> Image:
             fill_values = intercept + slope * np.arange(sec.x_min, sec.x_max)
             image.data[sec.x_min : sec.x_max, y] = fill_values
 
-    return image
-
-
-@plot()
-@pipeline_task()
-def handle_cosmetics(image: Image, primary_headers: Headers) -> Image:
-    """Sets variance to infinity for known bad pixel regions"""
-    image = image.copy()
-    # channel = primary_headers.get_str("CHANNEL")
-
-    # if channel == "R":
-    #     image = handle_special_red_cosmetics(image, primary_headers)
-
-    # image = cheat_cosmetics(image, channel)
     return image
