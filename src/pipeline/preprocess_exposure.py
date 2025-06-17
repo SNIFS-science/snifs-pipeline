@@ -11,7 +11,7 @@ from pipeline.tasks.preprocessing import plot_images
 from pipeline.tasks.preprocessing.bichips import assemble_bichip_to_image, handle_saturation, split_and_standardise
 from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
 from pipeline.tasks.preprocessing.common import add_poisson_noise_to_variance, ensure_float64
-from pipeline.tasks.preprocessing.models import DarkModel, subtract_bias
+from pipeline.tasks.preprocessing.models import DarkModel, subtract_bias, subtract_dark
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
 from pipeline.tasks.preprocessing.plots import clear_output_path, plot
 
@@ -75,11 +75,11 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     image = subtract_bias(image, bias_reference, primary_headers)
 
     # The darks can use a model with a stacked image, so it's not either or.
-    # dark_model = DarkModel.model_validate_json(config.dark_model_file.read_text())
-    # dark_images = None
-    # if config.use_dark_stack_if_possible:
-    #     dark_images = Image.stack_from_fits_file(config.dark_image_file, transpose=True)
-    # chip.image = subtract_dark(chip.image, dark_model, dark_images, chip.primary_headers)
+    dark_model = DarkModel.model_validate_json(config.dark_model_file.read_text())
+    dark_images = None
+    if config.use_dark_stack_if_possible:
+        dark_images = Image.stack_from_fits_file(config.dark_image_file, transpose=True)
+    image = subtract_dark(image, dark_model, dark_images, primary_headers)
 
     # if primary.channel == "R":
     #     image = handle_special_red_cosmetics(image, primary_headers)

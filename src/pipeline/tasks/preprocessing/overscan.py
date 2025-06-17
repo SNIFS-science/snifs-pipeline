@@ -41,10 +41,6 @@ def correct_even_odd(image: Image) -> Image:
     result = linregress(np.arange(odd_means.size), odd_means)
     slope, intercept = result.slope, result.intercept  # type: ignore
 
-    # slope, intercept = -6.072720355e-06, -1.4087406134
-    # slope, intercept = 2.5839584208e-05, 1.0279772404
-    # logger.warning("You're still using hardcoded values bruh")
-
     # At this point we have a linear fit to the odd differences in the bias section.
     # TODO: This part is super confusing to read to. Conceptually I think its just subtract it out
     y_values = np.arange(image.data.shape[1], dtype=np.float64)
@@ -89,39 +85,17 @@ def subtract_offset(image: Image) -> Image:
     bias_section, bias_data, _ = image.get_bias_section()
     mean = np.mean(bias_data, axis=0)
 
-    # To compute the variance, the RMS is loaded from the RDNOISE header value
-    # and then divided by the X-length of the array (so one value per Y)
-    # NOTE: this is a red herring - the value does not come from the instrument,
-    # but RDNOISE is set in the prior AddOverscanVariance function. It's just the average
-    # RMS noise of the bias section
-    # assert "RDNOISE" in image.header, "RDNOISE header value not set. It should be set in Add add_overscan_variance."
-    # column_variance = image.header.get_float("RDNOISE", 0.0) ** 2 / bias_data.shape[1]
-
     # Now turning to ImproveLinesMedian in overscan.cxx:296, we have an array of means
-    # and variances, and it seems the algorithm uses a median filter on those arrays
-    # to estimate things. From OverscanBase, the default window is 5 pixels to either side.
-    # There may be some subtlety in the default of scipy's boundary condition.
+    # and variances, and the algo uses a median filter on those means.
     window_size = 5 * 2 + 1  # 5 pixels on either side, plus the pixel itself
-    medians = median_filter(mean, size=window_size, mode="reflect")
-
-    # Now, the variance is trickier. The math is computed as if our means
-    # are a square distribution, and as the lines are full correlated, the
-    # original algorithm adds 'a small something' to the variance. Apparently
-    # this should not worry us too much, because the variance added here is negligible
-    # when compared to the readout error. This comes to the original variance / 3 / (N+2)
-    # where N are the number of pixels in the window.
-    #! TODO: Check in with Greg about the spaxel locations. If we dont have to worry about the
-    #! first few pixels, great
-    # column_variance /= 3 * (window_size + 2)
+    offset_centre = median_filter(mean, size=window_size, mode="reflect")
 
     # Now that we have the medians and the variance, overscan.cxx:83. SubstractRamp is called
     # This algorithm makes a ramp between left and right overscans
-    # I note that the first pixel of the medians (due to window effects) is trash and should not be used
     line_length = image.data.shape[0]
-    line_zero = 0.5 * (bias_section.x_min + bias_section.x_max + 1)
-    # Correction for chip edges
-    offset_edge = np.insert(medians[1:], medians.size - 1, medians[-1])
-    offset_centre = medians
+    line_zero = 0.5 * (bias_section.x_min + bias_section.x_max + 1)  # Middle of the bias section
+    offset_edge = np.insert(offset_centre[1:], offset_centre.size - 1, offset_centre[-1])
+
     # If interpolating, we're really interpolating from one bias section midpoint to the next.
     # Ie if the midpoint was 80% of the way through, [xxxxxxxMxx] then out lerp (uncaring about points in the
     # the biassec after the midpoint) would be: [0.2 ... 1.0, 1.0, 1.0]
@@ -130,7 +104,7 @@ def subtract_offset(image: Image) -> Image:
     start = (line_length - line_zero + 1) / line_length
     end = line_length / line_zero
     lerp = np.clip(np.linspace(start, end, line_length), 0, 1)
-    index = np.repeat(lerp[:, None], medians.size, axis=1)
+    index = np.repeat(lerp[:, None], offset_centre.size, axis=1)
     correction = offset_edge * (1 - index) + offset_centre * index
 
     if correction.shape[1] < image.data.shape[1]:
@@ -144,17 +118,14 @@ def subtract_offset(image: Image) -> Image:
 
     image.data -= correction
 
-    # The variance is just a constant value (apart from at the window boundary technically)
-    # and so that means that all the differences used to compute the slope are 0.
-
     # There are some header value shenanigans in overscan.cxx:585 that I replicate
     # with minimal understanding.
     if image.header.get_optional_str("OBSTYPE") != "BIAS":  #! TODO: this negation confuses me
         image.header["BIASFRAM"] = 1
 
     # Save out the median medians to the header for posterity
-    overscan_median = float(np.median(medians))
-    max_overscan = float(max(np.max(medians), (2 * medians[0]) - medians[1]))
+    overscan_median = float(np.median(offset_centre))
+    max_overscan = float(np.max(offset_centre))
     # ^ Don't ask me why it also compares to double the first difference.
     image.header["OVSCMED"] = overscan_median
     image.header["OVSCMAX"] = max_overscan
