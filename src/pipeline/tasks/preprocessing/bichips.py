@@ -65,6 +65,7 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> t
         primary_headers[f"OVSCMAX{i}"] = image.header.get_float("OVSCMAX")
         primary_headers[f"OVSCMED{i}"] = image.header.get_float("OVSCMED")
         primary_headers[f"OEPARAM{i}"] = image.header.get_float_list("OEPARAM")
+        primary_headers["CCDSEC"] = f"[1:{compound_data.shape[0]},1:{compound_data.shape[1]}]"
 
     # So the saturation calculation is more complex
     saturations: list[float] = [
@@ -93,6 +94,7 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> t
     for key in ["BIASSEC"]:
         if key in combined_header:
             del combined_header[key]
+    combined_header["CCDSEC"] = f"[1:{compound_data.shape[0]},1:{compound_data.shape[1]}]"
 
     final_image = Image(data=compound_data, header=combined_header, variance=compound_variance)
     return final_image, primary_headers

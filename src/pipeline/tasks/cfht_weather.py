@@ -3,9 +3,8 @@ from datetime import timedelta as td
 from datetime import timezone as tz
 from pathlib import Path
 
-import pandera as pa
 import polars as pl
-from pandera.polars import DataFrameModel
+from pandera.polars import DataFrameModel, Field
 from pandera.typing.polars import DataFrame, Series
 
 from pipeline.common.log import get_logger
@@ -15,12 +14,12 @@ from pipeline.resolver.resolver import Resolver
 
 
 class Weather(DataFrameModel):
-    time: Series[UTCDatetime] = pa.Field(unique=True)
-    wind_speed: Series[int] = pa.Field(description="Wind speed in knots")
-    wind_direction: Series[int] = pa.Field(description="Wind direction in degrees")
-    temperature: Series[float] = pa.Field(description="Temperature in degrees Celsius")
-    relative_humidity: Series[int] = pa.Field(description="Relative humidity in percent")
-    pressure: Series[float] = pa.Field(nullable=True, description="Pressure in millibars")
+    time: Series[UTCDatetime] = Field(unique=True)
+    wind_speed: Series[int] = Field(description="Wind speed in knots")
+    wind_direction: Series[int] = Field(description="Wind direction in degrees")
+    temperature: Series[float] = Field(description="Temperature in degrees Celsius")
+    relative_humidity: Series[int] = Field(description="Relative humidity in percent")
+    pressure: Series[float] = Field(nullable=True, description="Pressure in millibars")
 
 
 WeatherDataFrame = DataFrame[Weather]

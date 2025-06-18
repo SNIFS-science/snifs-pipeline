@@ -5,11 +5,10 @@ from functools import partial
 from pathlib import Path
 from typing import Annotated
 
-import pandera as pa
 import polars.selectors as cs
 from astropy.io import fits
 from pandera.engines.polars_engine import DateTime
-from pandera.polars import DataFrameModel
+from pandera.polars import DataFrameModel, Field
 from pandera.typing.polars import DataFrame, Series
 from pydantic import BaseModel, BeforeValidator, FilePath, ValidationInfo
 
@@ -49,25 +48,25 @@ class FileType(StrEnum):
 
 
 class FileStoreModel(DataFrameModel):
-    file_path: Series[str] = pa.Field(unique=True)
-    file_name: Series[str] = pa.Field()
-    type: Series[FileType] = pa.Field(coerce=True)
-    object: Series[str] = pa.Field(nullable=True)
-    object_ra: Series[str] = pa.Field(nullable=True)
-    object_dec: Series[str] = pa.Field(nullable=True)
-    run_id: Series[str] = pa.Field(nullable=True)
-    observation_id: Series[str] = pa.Field(nullable=True)
-    time_added: Series[UTCDatetime] = pa.Field(coerce=True)
-    time_creation: Series[UTCDatetime] = pa.Field(nullable=True, coerce=True)
-    time_observation: Series[UTCDatetime] = pa.Field(nullable=True, coerce=True)
-    exposure_seconds: Series[float] = pa.Field(nullable=True)
-    dark_seconds: Series[float] = pa.Field(nullable=True)
-    altitude: Series[float] = pa.Field(nullable=True)
-    azimuth: Series[float] = pa.Field(nullable=True)
-    cass_rotation_angle: Series[float] = pa.Field(nullable=True)
-    filter: Series[str] = pa.Field(nullable=True)
-    channel: Series[str] = pa.Field(nullable=True)
-    detector: Series[str] = pa.Field(nullable=True)
+    file_path: Series[str] = Field(unique=True)
+    file_name: Series[str] = Field()
+    type: Series[FileType] = Field(coerce=True)
+    object: Series[str] = Field(nullable=True)
+    object_ra: Series[str] = Field(nullable=True)
+    object_dec: Series[str] = Field(nullable=True)
+    run_id: Series[str] = Field(nullable=True)
+    observation_id: Series[str] = Field(nullable=True)
+    time_added: Series[UTCDatetime] = Field(coerce=True)
+    time_creation: Series[UTCDatetime] = Field(nullable=True, coerce=True)
+    time_observation: Series[UTCDatetime] = Field(nullable=True, coerce=True)
+    exposure_seconds: Series[float] = Field(nullable=True)
+    dark_seconds: Series[float] = Field(nullable=True)
+    altitude: Series[float] = Field(nullable=True)
+    azimuth: Series[float] = Field(nullable=True)
+    cass_rotation_angle: Series[float] = Field(nullable=True)
+    filter: Series[str] = Field(nullable=True)
+    channel: Series[str] = Field(nullable=True)
+    detector: Series[str] = Field(nullable=True)
 
 
 FileStoreDataFrame = DataFrame[FileStoreModel]

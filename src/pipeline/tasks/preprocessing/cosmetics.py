@@ -37,6 +37,7 @@ SPECIAL_ERROR_FAST = 0.18
 def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Image:  # noqa: C901
     """Please don't ever ask me why anything in this function is the way it is."""
     logger = get_logger()
+    image = image.copy()
     ccd_section, ccd_data, ccd_var = image.get_ccd_section()
     # Please don't ask me why this one has a 1. See imagesnifs.cxx:860 and weep with me
     saturate = primary_headers.get_float("SATURAT1", 0.0)
@@ -48,7 +49,9 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
         # And they then translate into the ccd section index.
         ix = bad_x_initial - ccd_section.x_min
         if ix < 0 or ix >= ccd_data.shape[0]:
-            logger.warning("Unable to apply special red cosmetics to image. Bad x index out of bounds.")
+            logger.warning(
+                f"Unable to apply special red cosmetics to image. Bad x index {bad_x_initial} out of bounds."
+            )
             return image
         # Same thing with the y section
         y_beg = min(2937 - ccd_section.y_min, ccd_data.shape[1])  # imagesnifs.cxx:874 and 896
@@ -104,8 +107,8 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
         #   we neglect the scaling of +0.04% effect on the variance.
         #   but there is a systematic uncertainty we take into account.
         #   called kSpecialErrorFast [the computation is however NOT accurate for rasters]
-        ramp = np.linspace((y_end + 1) / ccd_data.shape[1], 1, ccd_data.shape[1] - (y_end + 1), endpoint=False)
-        ccd_var[ix, y_end:] += (ramp * correction * SPECIAL_ERROR_FAST * SPECIAL_CONSERVATIVE) ** 2
+        indexes = np.arange(y_end + 1, ccd_data.shape[1])
+        ccd_var[ix, y_end + 1 :] += (indexes * correction * SPECIAL_ERROR_FAST * SPECIAL_CONSERVATIVE) ** 2
         image.header["CORRLOW"] = True  # In the original code this the correction... but also overwrites itself
 
         # imagesnifs.cxx:974 -> The medium part : assume we lost all the information
@@ -128,19 +131,20 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
         #
         # SAM: This is the correction from 0 to y_beg. It seems to be just taking a
         # median on the difference to the left+right column average.
-        means = 0.5 * (ccd_data[ix - 1, y_beg:y_end] + ccd_data[ix + 1, y_beg:y_end])
-        differences = ccd_data[ix, y_beg:y_end] - means
-        correction = np.median(differences)
-        # Before applying this correction, there are some checks that the old code runs (line 1014)
-        # Its actually just checking to see if the correction is less than 1sigma, with sigma being the
-        # ...
-        # ...
-        # wait.
-        # Its doing all this logic to set the value correctly...
-        # But then on line 1022 it sets the variance to 1e31 anyway
-        # SO WHAT IS THE POINT OF ALL THIS?
-        # Fine. I'm simplifying. No fancy checks using the variance only to blow it up. Use path on 1019
-        ccd_data[ix, :y_beg] = means - correction
+        if y_beg > 0:
+            means = 0.5 * (ccd_data[ix - 1, y_beg:y_end] + ccd_data[ix + 1, y_beg:y_end])
+            differences = ccd_data[ix, y_beg:y_end] - means
+            correction = np.median(differences)
+            # Before applying this correction, there are some checks that the old code runs (line 1014)
+            # Its actually just checking to see if the correction is less than 1sigma, with sigma being the
+            # ...
+            # ...
+            # wait.
+            # Its doing all this logic to set the value correctly...
+            # But then on line 1022 it sets the variance to 1e31 anyway
+            # SO WHAT IS THE POINT OF ALL THIS?
+            # Fine. I'm simplifying. No fancy checks using the variance only to blow it up. Use path on 1019
+            ccd_data[ix, :y_beg] = means - correction
     return image
 
 

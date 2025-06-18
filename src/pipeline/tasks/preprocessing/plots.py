@@ -1,3 +1,4 @@
+import contextlib
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
@@ -21,7 +22,7 @@ _BIAS_STORE: dict[str, list[Image]] = OrderedDict()
 
 P = ParamSpec("P")
 R = TypeVar("R")
-ZOOM_START = (1024 - 110, 512)
+ZOOM_START = (1500, 512)
 ZOOM_SIZE = (100, 100)
 ZOOM_END = (ZOOM_START[0] + ZOOM_SIZE[0], ZOOM_START[1] + ZOOM_SIZE[1])
 MIDLINE_X_COORD = ZOOM_START[0] + ZOOM_SIZE[0] // 2
@@ -167,29 +168,31 @@ def add_section_rectangle(ax: plt.Axes, section: Section, **kwargs) -> None:  # 
 def add_ticks(ax: plt.Axes, locations: dict[int, str], axis: str = "y", reach: float = 0.02) -> None:  # type: ignore
     # Matplotlib won't let you do different coloured ticks, so we'll do it ourselves.
     for location, colour in locations.items():
-        if axis == "y":
-            ax.axhline(location, xmin=0, xmax=reach, color=colour, lw=0.5)
-            ax.axhline(location, xmin=(1 - reach), xmax=1, color=colour, lw=0.5)
-        elif axis == "x":
-            ax.axvline(location, ymin=0, ymax=reach, color=colour, lw=0.5)
-            ax.axvline(location, ymin=(1 - reach), ymax=1, color=colour, lw=0.5)
+        with contextlib.suppress(Exception):
+            if axis == "y":
+                ax.axhline(location, xmin=0, xmax=reach, color=colour, lw=0.5)
+                ax.axhline(location, xmin=(1 - reach), xmax=1, color=colour, lw=0.5)
+            elif axis == "x":
+                ax.axvline(location, ymin=0, ymax=reach, color=colour, lw=0.5)
+                ax.axvline(location, ymin=(1 - reach), ymax=1, color=colour, lw=0.5)
 
 
 def add_midlines(ax: plt.Axes) -> None:  # type: ignore
-    ax.hlines(
-        MIDLINE_Y_COORD,
-        xmin=ZOOM_START[0],
-        xmax=ZOOM_END[0],
-        color=MIDLINE_HORIZONTAL_COLOUR,
-        lw=0.5,
-    )
-    ax.vlines(
-        MIDLINE_X_COORD,
-        ymin=ZOOM_START[1],
-        ymax=ZOOM_END[1],
-        color=MIDLINE_VERTICAL_COLOUR,
-        lw=0.5,
-    )
+    with contextlib.suppress(Exception):
+        ax.hlines(
+            MIDLINE_Y_COORD,
+            xmin=ZOOM_START[0],
+            xmax=ZOOM_END[0],
+            color=MIDLINE_HORIZONTAL_COLOUR,
+            lw=0.5,
+        )
+        ax.vlines(
+            MIDLINE_X_COORD,
+            ymin=ZOOM_START[1],
+            ymax=ZOOM_END[1],
+            color=MIDLINE_VERTICAL_COLOUR,
+            lw=0.5,
+        )
     ax.set_xmargin(0)
     ax.set_ymargin(0)
 
@@ -202,11 +205,11 @@ def get_vrange(data: np.ndarray) -> tuple[float, float]:
         # If the min and max are of different signs, we need to adjust the range so zero is white
         vmin = min(vmin, -np.abs(vmax))
         vmax = max(vmax, np.abs(vmin))
-    return vmin, vmax
+    return float(vmin), float(vmax)
 
 
 @pipeline_task()
-def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
+def plot_detailed_images(primary: FileStoreEntry) -> None:  # noqa: C901
     # TODO: full image run id, type, channel on image itself
     # TODO: add a dotted fun box around the biassec if it exists
     """Plot the images in the data store."""
@@ -310,14 +313,18 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
             add_colorbar("ΔVar", fig, axvd, imvd)
 
             zoomed_data_diff = extract_zoom(data_diff)
-            vmin, vmax = np.nanpercentile(zoomed_data_diff, [1, 99])
-            imddz = axdzd.imshow(zoomed_data_diff.T, cmap=CMAP_DIFF, aspect="auto", vmin=vmin, vmax=vmax, **im_kw)
-            add_colorbar("Zoomed ΔData", fig, axdzd, imddz, height=0.04)
+            if zoomed_data_diff.size:
+                vmin, vmax = np.nanpercentile(zoomed_data_diff, [1, 99])
+                imddz = axdzd.imshow(zoomed_data_diff.T, cmap=CMAP_DIFF, aspect="auto", vmin=vmin, vmax=vmax, **im_kw)
+                add_colorbar("Zoomed ΔData", fig, axdzd, imddz, height=0.04)
 
             zoomed_variance_diff = extract_zoom(variance_diff)
-            vmin, vmax = np.nanpercentile(zoomed_variance_diff, [1, 99])
-            imvdz = axvzd.imshow(zoomed_variance_diff.T, cmap=CMAP_DIFF, aspect="auto", vmin=vmin, vmax=vmax, **im_kw)
-            add_colorbar("Zoomed ΔVar", fig, axvzd, imvdz, height=0.04)
+            if zoomed_variance_diff.size:
+                vmin, vmax = np.nanpercentile(zoomed_variance_diff, [1, 99])
+                imvdz = axvzd.imshow(
+                    zoomed_variance_diff.T, cmap=CMAP_DIFF, aspect="auto", vmin=vmin, vmax=vmax, **im_kw
+                )
+                add_colorbar("Zoomed ΔVar", fig, axvzd, imvdz, height=0.04)
 
             for ax in (axd, axv, axdd, axvd):
                 add_callout_rectangle(ax)
@@ -354,12 +361,13 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
 
             # We also want to add the midlines to the midline axes
             for ax, sec in [(axxc, data), (axyc, variance), (axxcd, data_diff), (axycd, variance_diff)]:
-                column = sec[MIDLINE_X_COORD, ZOOM_START[1] : ZOOM_END[1]]
-                ax.step(np.arange(column.size), column, where="post", color=MIDLINE_VERTICAL_COLOUR, **kwargs)
-                row = sec[ZOOM_START[0] : ZOOM_END[0], MIDLINE_Y_COORD]
-                ax.step(np.arange(row.size), row, where="post", color=MIDLINE_HORIZONTAL_COLOUR, **kwargs)
-                combined = np.concatenate((column.flatten(), row.flatten()))
-                ax.set_ylim(*np.nanpercentile(combined, y_lim_percentages))
+                with contextlib.suppress(Exception):
+                    column = sec[MIDLINE_X_COORD, ZOOM_START[1] : ZOOM_END[1]]
+                    ax.step(np.arange(column.size), column, where="post", color=MIDLINE_VERTICAL_COLOUR, **kwargs)
+                    row = sec[ZOOM_START[0] : ZOOM_END[0], MIDLINE_Y_COORD]
+                    ax.step(np.arange(row.size), row, where="post", color=MIDLINE_HORIZONTAL_COLOUR, **kwargs)
+                    combined = np.concatenate((column.flatten(), row.flatten()))
+                    ax.set_ylim(*np.nanpercentile(combined, y_lim_percentages))
 
             # We also want to mark this on the axes above as well. Not as a line,
             # as there would be too many, but as etra tick marks on the side of the axes.
@@ -391,9 +399,9 @@ def plot_images(primary: FileStoreEntry) -> None:  # noqa: C901
             axxddl.set_xlabel("ΔData columns", fontsize=8)
             axyvdl.set_xlabel("ΔVariance rows", fontsize=8)
             axxvdl.set_xlabel("ΔVariance columns", fontsize=8)
-        output_location = output_path / f"{i}_{key}.png"
+        output_location = output_path / f"{i}_{key}.webp"
         logger.info(f"Saving plot to {output_location}")
-        fig.savefig(output_location, dpi=450, bbox_inches="tight")
+        fig.savefig(output_location, dpi=600, bbox_inches="tight")
         plt.close(fig)
 
         prior_images = images

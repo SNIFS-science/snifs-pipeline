@@ -7,13 +7,14 @@ from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.resolver.common import FileType
 from pipeline.tasks.build_filestore import FlowConfig
 from pipeline.tasks.common import Image, load_all_data_extensions_with_headers, load_headers
-from pipeline.tasks.preprocessing import plot_images
+from pipeline.tasks.preprocessing import plot_detailed_images
 from pipeline.tasks.preprocessing.bichips import assemble_bichip_to_image, handle_saturation, split_and_standardise
 from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
 from pipeline.tasks.preprocessing.common import add_poisson_noise_to_variance, ensure_float64
+from pipeline.tasks.preprocessing.cosmetics import handle_special_red_cosmetics
 from pipeline.tasks.preprocessing.models import DarkModel, subtract_bias, subtract_dark
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
-from pipeline.tasks.preprocessing.plots import clear_output_path, plot
+from pipeline.tasks.preprocessing.plots import clear_output_path, plot, plot_bias_sections
 
 
 class PreprocessExposure(FlowConfig):
@@ -68,24 +69,25 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     image, primary_headers = assemble_bichip_to_image(images, primary_headers)
     image = add_poisson_noise_to_variance(image)
 
+    # You have two options for bias subtraction: either a bias image or a bias model.
     if config.prefer_bias_image_over_model:
         bias_reference = Image.from_fits_file(config.bias_image_file, transpose=True)
     else:
         bias_reference = DarkModel.model_validate_json(config.bias_model_file.read_text())
     image = subtract_bias(image, bias_reference, primary_headers)
 
-    # The darks can use a model with a stacked image, so it's not either or.
+    # The darks can use a model *with* a stacked image, so it's not either or.
     dark_model = DarkModel.model_validate_json(config.dark_model_file.read_text())
     dark_images = None
     if config.use_dark_stack_if_possible:
         dark_images = Image.stack_from_fits_file(config.dark_image_file, transpose=True)
     image = subtract_dark(image, dark_model, dark_images, primary_headers)
 
-    # if primary.channel == "R":
-    #     image = handle_special_red_cosmetics(image, primary_headers)
+    if primary.channel == "R":
+        image = handle_special_red_cosmetics(image, primary_headers)
     image = debug_comparison(image, primary.channel)
-    # plot_bias_sections(primary)
-    plot_images(primary)
+    plot_bias_sections(primary)
+    plot_detailed_images(primary)
 
 
 if __name__ == "__main__":
