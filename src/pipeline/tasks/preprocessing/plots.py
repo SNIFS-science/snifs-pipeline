@@ -22,7 +22,7 @@ _BIAS_STORE: dict[str, list[Image]] = OrderedDict()
 
 P = ParamSpec("P")
 R = TypeVar("R")
-ZOOM_START = (1530, 2900)
+ZOOM_START = (1550, 2915)
 ZOOM_SIZE = (50, 50)
 ZOOM_END = (ZOOM_START[0] + ZOOM_SIZE[0], ZOOM_START[1] + ZOOM_SIZE[1])
 MIDLINE_X_COORD = ZOOM_START[0] + ZOOM_SIZE[0] // 2
@@ -209,7 +209,7 @@ def get_vrange(data: np.ndarray) -> tuple[float, float]:
 
 
 @pipeline_task()
-def plot_detailed_images(primary: FileStoreEntry) -> None:  # noqa: C901
+def plot_detailed_images(primary: FileStoreEntry, start: str | None = None) -> None:  # noqa: C901
     # TODO: full image run id, type, channel on image itself
     # TODO: add a dotted fun box around the biassec if it exists
     """Plot the images in the data store."""
@@ -218,16 +218,26 @@ def plot_detailed_images(primary: FileStoreEntry) -> None:  # noqa: C901
         logger.info("Plotting is disabled. Skipping plot generation.")
         return
 
+    if start is None:
+        store = _IMAGE_STORE
+    else:
+        assert start in _IMAGE_STORE, f"Start task '{start}' not found in _IMAGE_STORE."
+        store = {}
+        found = False
+        for key, images in _IMAGE_STORE.items():
+            if key == start:
+                found = True
+            if found:
+                store[key] = images
+
     output_path = determine_output_path(primary)
     title_prefix = determine_figure_prefix(primary)
 
-    all_data = np.concatenate(
-        [im.data.astype(np.float64).flatten() for images in _IMAGE_STORE.values() for im in images]
-    )
+    all_data = np.concatenate([im.data.astype(np.float64).flatten() for images in store.values() for im in images])
     min_c_data, max_c_data = np.nanpercentile(all_data, [1, 99])
 
     tasks_to_plot, prior_images = {}, None
-    for key, images in _IMAGE_STORE.items():
+    for key, images in store.items():
         if prior_images is not None and images == prior_images:
             prior_images = images
             logger.warning(f"Skipping plotting for {key} as it is the same as the previous task.")
@@ -236,7 +246,7 @@ def plot_detailed_images(primary: FileStoreEntry) -> None:  # noqa: C901
         tasks_to_plot[key] = images
 
     prior_images = None
-    for i, (key, images) in enumerate(_IMAGE_STORE.items()):
+    for i, (key, images) in enumerate(store.items()):
         title = f"{title_prefix} - {key}"
         num_cols = len(images) * 4
         aspect_ratio = images[0].data.shape[1] / images[0].data.shape[0]

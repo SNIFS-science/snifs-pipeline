@@ -6,6 +6,7 @@ from pipeline.tasks.common import (
     Image,
     listify,
 )
+from pipeline.tasks.preprocessing.plots import plot
 
 GAINS = {
     "B": [0.773, 0.744],
@@ -14,7 +15,7 @@ GAINS = {
 }
 
 
-# @plot()
+@plot()
 @pipeline_task()
 def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> tuple[Image, Headers]:
     """Ensures we have a 2048x4096 exposure image from the raw file.
@@ -99,7 +100,7 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> t
     return final_image, primary_headers
 
 
-# @plot()
+@plot()
 @pipeline_task()
 def split_and_standardise(images: list[Image]) -> list[Image]:
     """Detcom (blue) comes in 2 extensions, one for each amplifier.
@@ -171,7 +172,7 @@ def split_and_standardise(images: list[Image]) -> list[Image]:
     return new_images
 
 
-# @plot()
+@plot()
 @pipeline_task()
 @listify
 def handle_saturation(image: Image) -> Image:

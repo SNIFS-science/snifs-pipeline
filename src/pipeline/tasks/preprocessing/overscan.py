@@ -5,11 +5,11 @@ from scipy.stats import linregress
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_task
 from pipeline.tasks.common import Image, flag_skip, listify
-from pipeline.tasks.preprocessing.plots import plot_bias
+from pipeline.tasks.preprocessing.plots import plot, plot_bias
 
 
 @plot_bias()
-# @plot()
+@plot()
 @pipeline_task()
 @listify
 @flag_skip("OEPARAM")
@@ -57,7 +57,6 @@ def correct_even_odd(image: Image) -> Image:
 
 
 @plot_bias()
-# @plot()
 @pipeline_task()
 @listify
 @flag_skip("OVSCNOIS")
@@ -74,7 +73,7 @@ def add_overscan_variance(image: Image) -> Image:
 
 
 @plot_bias()
-# @plot()
+@plot()
 @pipeline_task()
 @listify
 @flag_skip("OVSCDONE")

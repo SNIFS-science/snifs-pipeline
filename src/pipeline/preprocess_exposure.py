@@ -87,7 +87,7 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
         image = handle_special_red_cosmetics(image, primary_headers)
     image = debug_comparison(image, primary.channel)
     # plot_bias_sections(primary)
-    plot_detailed_images(primary)
+    plot_detailed_images(primary, start="subtract_dark")
 
 
 if __name__ == "__main__":
