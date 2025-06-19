@@ -22,8 +22,8 @@ _BIAS_STORE: dict[str, list[Image]] = OrderedDict()
 
 P = ParamSpec("P")
 R = TypeVar("R")
-ZOOM_START = (1500, 512)
-ZOOM_SIZE = (100, 100)
+ZOOM_START = (1530, 2900)
+ZOOM_SIZE = (50, 50)
 ZOOM_END = (ZOOM_START[0] + ZOOM_SIZE[0], ZOOM_START[1] + ZOOM_SIZE[1])
 MIDLINE_X_COORD = ZOOM_START[0] + ZOOM_SIZE[0] // 2
 MIDLINE_Y_COORD = ZOOM_START[1] + ZOOM_SIZE[1] // 2
@@ -144,7 +144,7 @@ def add_colorbar(label: str, fig: plt.Figure, ax: plt.Axes, im: AxesImage, heigh
     cbax = ax.inset_axes([0, -height, 1.0, height], transform=ax.transAxes)  # type: ignore
     cbar = fig.colorbar(im, cax=cbax, orientation="horizontal", format="%1g")
     cbar.set_label(label, size=8)
-    cbar.ax.tick_params(rotation=45, labelsize=6)
+    cbar.ax.tick_params(rotation=0, labelsize=4)
 
 
 def add_callout_rectangle(ax: plt.Axes) -> None:  # type: ignore
@@ -224,7 +224,7 @@ def plot_detailed_images(primary: FileStoreEntry) -> None:  # noqa: C901
     all_data = np.concatenate(
         [im.data.astype(np.float64).flatten() for images in _IMAGE_STORE.values() for im in images]
     )
-    min_c_data, max_c_data = np.percentile(all_data, [1, 99])
+    min_c_data, max_c_data = np.nanpercentile(all_data, [1, 99])
 
     tasks_to_plot, prior_images = {}, None
     for key, images in _IMAGE_STORE.items():
@@ -245,8 +245,8 @@ def plot_detailed_images(primary: FileStoreEntry) -> None:  # noqa: C901
             5,
             num_cols,
             figsize=(num_cols * 1.5 + 7, 16),
-            gridspec_kw={"hspace": 0.3, "wspace": 0.2},
-            height_ratios=[aspect_ratio, 1, 1, 1, 1],
+            gridspec_kw={"hspace": 0.2, "wspace": 0.2},
+            height_ratios=[1.5 * aspect_ratio, 1, 1, 1, 1],
         )
         axes[0, 0].annotate(title, xy=(0, 1.01), xycoords="axes fraction", ha="left", va="bottom", fontsize=10)
         for k, image in enumerate(images):

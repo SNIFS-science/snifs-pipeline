@@ -14,7 +14,7 @@ from pipeline.tasks.preprocessing.common import add_poisson_noise_to_variance, e
 from pipeline.tasks.preprocessing.cosmetics import handle_special_red_cosmetics
 from pipeline.tasks.preprocessing.models import DarkModel, subtract_bias, subtract_dark
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
-from pipeline.tasks.preprocessing.plots import clear_output_path, plot, plot_bias_sections
+from pipeline.tasks.preprocessing.plots import clear_output_path, plot
 
 
 class PreprocessExposure(FlowConfig):
@@ -86,7 +86,7 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     if primary.channel == "R":
         image = handle_special_red_cosmetics(image, primary_headers)
     image = debug_comparison(image, primary.channel)
-    plot_bias_sections(primary)
+    # plot_bias_sections(primary)
     plot_detailed_images(primary)
 
 

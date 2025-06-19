@@ -39,10 +39,12 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
     logger = get_logger()
     image = image.copy()
     ccd_section, ccd_data, ccd_var = image.get_ccd_section()
-    # Please don't ask me why this one has a 1. See imagesnifs.cxx:860 and weep with me
-    saturate = primary_headers.get_float("SATURAT1", 0.0)
+    # Please don't ask me why this is SATURAT1. See imagesnifs.cxx:860 and weep with me
+    # Sam: alright the code doesnt make sense with SATURAT1, so Im guessing this must be a fits header array
+    # flattening thing going on. Regardless, the bad x values are on the second amp reading
+    saturate = primary_headers.get_float_list("SATURATE")[1]
 
-    bad_xs = [1574, 1579]
+    bad_xs = [1575, 1580]
     for i, bad_x_initial in enumerate(bad_xs):
         # In imagesnifs.cxx:866 they subtract the ccd section. So the bad_xs correspond
         # to the index of the entire data array, not the ccd section.
@@ -98,8 +100,8 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
         # 1st, the quick-clocked part. That is, the beginning of the line = high y as it is flipped
         # SAM: So this is applying to y values LARGER than y_end, not the y_beginning -> y_end range
         k_last, k_height = 4087, 41
-        ground_data, _ = image.get_section(Section(x_min=ix - 4, x_max=ix + 4, y_min=k_last - k_height, y_max=k_last))
-        line_data, _ = image.get_section(Section(x_min=ix, x_max=ix, y_min=k_last - k_height, y_max=k_last))
+        ground_data, _ = image.get_section(Section(x_min=ix - 4, x_max=ix + 5, y_min=k_last - k_height, y_max=k_last))
+        line_data, _ = image.get_section(Section(x_min=ix, x_max=ix + 1, y_min=k_last - k_height, y_max=k_last))
         correction = np.median(ground_data) - np.median(line_data)
         # The correction actually goes from y_end to the end of the data, not y_beginning to y_end
         ccd_data[ix, y_end + 1 :] += correction
@@ -108,7 +110,8 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
         #   but there is a systematic uncertainty we take into account.
         #   called kSpecialErrorFast [the computation is however NOT accurate for rasters]
         indexes = np.arange(y_end + 1, ccd_data.shape[1])
-        ccd_var[ix, y_end + 1 :] += (indexes * correction * SPECIAL_ERROR_FAST * SPECIAL_CONSERVATIVE) ** 2
+        ramp = (ccd_data.shape[1] - indexes) / (ccd_data.shape[1] - y_end)
+        ccd_var[ix, y_end + 1 :] += (ramp * correction * SPECIAL_ERROR_FAST * SPECIAL_CONSERVATIVE) ** 2
         image.header["CORRLOW"] = True  # In the original code this the correction... but also overwrites itself
 
         # imagesnifs.cxx:974 -> The medium part : assume we lost all the information
@@ -144,7 +147,7 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
             # But then on line 1022 it sets the variance to 1e31 anyway
             # SO WHAT IS THE POINT OF ALL THIS?
             # Fine. I'm simplifying. No fancy checks using the variance only to blow it up. Use path on 1019
-            ccd_data[ix, :y_beg] = means - correction
+            ccd_data[ix, :y_beg] -= correction
     return image
 
 

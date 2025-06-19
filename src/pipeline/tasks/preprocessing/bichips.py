@@ -6,7 +6,6 @@ from pipeline.tasks.common import (
     Image,
     listify,
 )
-from pipeline.tasks.preprocessing.plots import plot
 
 GAINS = {
     "B": [0.773, 0.744],
@@ -15,7 +14,7 @@ GAINS = {
 }
 
 
-@plot()
+# @plot()
 @pipeline_task()
 def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> tuple[Image, Headers]:
     """Ensures we have a 2048x4096 exposure image from the raw file.
@@ -35,15 +34,15 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> t
     # Let's do some basic checks before assembling into a single chip
     data_secs = {image.header.get_str("DATASEC") for image in images}
     assert len(data_secs) == 1, f"All images must have the same DATASEC, got {data_secs}"
+    channel = primary_headers.get_str("CHANNEL")
+
+    # If you're in the R channel, chip0 is on the right and chip1 is on the left
+    if channel == "R":
+        images = images[::-1]  # Reverse the order of the images
 
     # Go through and reverse directions as needed
     datas = [image.get_data_section() * image.header.get_float("GAIN") for image in images]
     variances = [image.get_data_section_variance() * (image.header.get_float("GAIN") ** 2) for image in images]
-    channel = primary_headers.get_str("CHANNEL")
-    # If you're in the R channel, chip0 is on the right and chip1 is on the left
-    if channel == "R":
-        datas = datas[::-1]
-        variances = variances[::-1]
 
     # If not R channel, flip the first amplifier in the X direction
     if channel != "R":
@@ -100,7 +99,7 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> t
     return final_image, primary_headers
 
 
-@plot()
+# @plot()
 @pipeline_task()
 def split_and_standardise(images: list[Image]) -> list[Image]:
     """Detcom (blue) comes in 2 extensions, one for each amplifier.
