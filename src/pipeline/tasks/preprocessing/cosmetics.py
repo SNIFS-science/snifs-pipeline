@@ -120,8 +120,10 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
         # and fill it with the average of the lines to either side.
         # TODO: I should breakpoint here and validate that these lines are actually bad.
         # TODO: Im worried about a one-off index meaning instead of fixing a problem, I create a new one.
-        ccd_data[ix, y_beg:y_end] = 0.5 * (ccd_data[ix - 1, y_beg:y_end] + ccd_data[ix + 1, y_beg:y_end])
-        ccd_var[ix, y_beg:y_end] = np.inf
+        ccd_data[ix, y_beg : y_end + 1] = 0.5 * (
+            ccd_data[ix - 1, y_beg : y_end + 1] + ccd_data[ix + 1, y_beg : y_end + 1]
+        )
+        ccd_var[ix, y_beg : y_end + 1] = np.inf
 
         # From imagesnifs.cxx:987:
         #   the hot part of the line is difficult to handle.
@@ -135,8 +137,9 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
         # SAM: This is the correction from 0 to y_beg. It seems to be just taking a
         # median on the difference to the left+right column average.
         if y_beg > 0:
-            means = 0.5 * (ccd_data[ix - 1, y_beg:y_end] + ccd_data[ix + 1, y_beg:y_end])
-            differences = ccd_data[ix, y_beg:y_end] - means
+            k_length = 50  # imagesnifs.cxx:999, TODO extract to constant
+            means = 0.5 * (ccd_data[ix - 1, :k_length] + ccd_data[ix + 1, :k_length])
+            differences = ccd_data[ix, :k_length] - means
             correction = np.median(differences)
             # Before applying this correction, there are some checks that the old code runs (line 1014)
             # Its actually just checking to see if the correction is less than 1sigma, with sigma being the
@@ -148,10 +151,11 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
             # SO WHAT IS THE POINT OF ALL THIS?
             # Fine. I'm simplifying. No fancy checks using the variance only to blow it up. Use path on 1019
             ccd_data[ix, :y_beg] -= correction
+            ccd_var[ix, :y_beg] = np.inf
     return image
 
 
-# @plot()
+@plot()
 @pipeline_task()
 def cheat_cosmetics(image: Image, channel: str) -> Image:
     image = image.copy()

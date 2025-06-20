@@ -11,7 +11,7 @@ from pipeline.tasks.preprocessing import plot_detailed_images
 from pipeline.tasks.preprocessing.bichips import assemble_bichip_to_image, handle_saturation, split_and_standardise
 from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
 from pipeline.tasks.preprocessing.common import add_poisson_noise_to_variance, ensure_float64
-from pipeline.tasks.preprocessing.cosmetics import handle_special_red_cosmetics
+from pipeline.tasks.preprocessing.cosmetics import cheat_cosmetics, handle_special_red_cosmetics
 from pipeline.tasks.preprocessing.models import DarkModel, subtract_bias, subtract_dark
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
 from pipeline.tasks.preprocessing.plots import clear_output_path, plot
@@ -50,7 +50,6 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     logger.info(f"Starting preprocessing with settings:\n{config.model_dump_json(indent=2)}\n")
     logger.info(f"Primary file:\n{primary.model_dump_json(indent=2)}\n")
     assert primary.channel is not None, "Primary file must have a channel defined in the headers."
-    clear_output_path(primary)
 
     # Start the preprocessing pipeline
     images = load_all_data_extensions_with_headers(config.primary_file, transpose=True)
@@ -85,9 +84,12 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
 
     if primary.channel == "R":
         image = handle_special_red_cosmetics(image, primary_headers)
+    image = cheat_cosmetics(image, primary.channel)
     image = debug_comparison(image, primary.channel)
+
+    clear_output_path(primary)
     # plot_bias_sections(primary)
-    plot_detailed_images(primary, start="subtract_dark")
+    plot_detailed_images(primary, start="subtract_bias")
 
 
 if __name__ == "__main__":

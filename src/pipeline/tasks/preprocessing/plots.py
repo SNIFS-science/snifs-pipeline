@@ -218,6 +218,8 @@ def plot_detailed_images(primary: FileStoreEntry, start: str | None = None) -> N
         logger.info("Plotting is disabled. Skipping plot generation.")
         return
 
+    prior_images = None
+
     if start is None:
         store = _IMAGE_STORE
     else:
@@ -229,6 +231,8 @@ def plot_detailed_images(primary: FileStoreEntry, start: str | None = None) -> N
                 found = True
             if found:
                 store[key] = images
+            else:
+                prior_images = images
 
     output_path = determine_output_path(primary)
     title_prefix = determine_figure_prefix(primary)
@@ -236,16 +240,6 @@ def plot_detailed_images(primary: FileStoreEntry, start: str | None = None) -> N
     all_data = np.concatenate([im.data.astype(np.float64).flatten() for images in store.values() for im in images])
     min_c_data, max_c_data = np.nanpercentile(all_data, [1, 99])
 
-    tasks_to_plot, prior_images = {}, None
-    for key, images in store.items():
-        if prior_images is not None and images == prior_images:
-            prior_images = images
-            logger.warning(f"Skipping plotting for {key} as it is the same as the previous task.")
-            continue
-        prior_images = images
-        tasks_to_plot[key] = images
-
-    prior_images = None
     for i, (key, images) in enumerate(store.items()):
         title = f"{title_prefix} - {key}"
         num_cols = len(images) * 4
