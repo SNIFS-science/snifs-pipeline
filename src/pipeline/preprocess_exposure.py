@@ -12,6 +12,7 @@ from pipeline.tasks.preprocessing.bichips import assemble_bichip_to_image, handl
 from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
 from pipeline.tasks.preprocessing.common import add_poisson_noise_to_variance, ensure_float64
 from pipeline.tasks.preprocessing.cosmetics import cheat_cosmetics, handle_special_red_cosmetics
+from pipeline.tasks.preprocessing.flats import apply_custom_red_flat
 from pipeline.tasks.preprocessing.models import DarkModel, subtract_bias, subtract_dark
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
 from pipeline.tasks.preprocessing.plots import clear_output_path, plot
@@ -23,6 +24,7 @@ class PreprocessExposure(FlowConfig):
     bias_model_file: FileType.BIAS_MODEL.Path = Field(default=None)  # type: ignore
     dark_image_file: FileType.DARK.Path = Field(default=None)  # type: ignore
     dark_model_file: FileType.DARK_MODEL.Path = Field(default=None)  # type: ignore
+    flat_image_file: FileType.CONTINUUM.Path = Field(default=None)  # type: ignore
     binary_offset_model_file: FileType.BINARY_OFFSET_MODEL.Path = Field(default=None)  # type: ignore
     prefer_bias_image_over_model: bool = Field(default=True)
     use_dark_stack_if_possible: bool = Field(default=True)
@@ -59,7 +61,6 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
 
     if len(images) == 2:  # Binary offset model is only derived for 2 chip models.
         images = correct_binary_offset(images, config.binary_offset_model_file)
-        pass
 
     images = ensure_float64(images)
     images = correct_even_odd(images)
@@ -86,6 +87,11 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
         image = handle_special_red_cosmetics(image, primary_headers)
     image = cheat_cosmetics(image, primary.channel)
     image = debug_comparison(image, primary.channel)
+
+    if config.flat_image_file is not None:
+        pass
+    elif primary.channel == "R":
+        image = apply_custom_red_flat(image)
 
     clear_output_path(primary)
     # plot_bias_sections(primary)

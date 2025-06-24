@@ -71,7 +71,7 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
 
         # Again Im not going to vectorise this right away because I'm worried
         # that I don't quite understand what's going on here.
-        for y in range(y_beg, y_end):
+        for y in range(y_beg, y_end + 1):
             prop, bound = 1, False  # I dont know what prop and bound are meant to be
             # So I'm going to mostly copy the original code without understanding it.
             if ccd_data[ix, y] < saturate:
@@ -82,7 +82,7 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
                 else:
                     prop = ccd_data[ix, y] / saturate
             if ccd_data[ix, y] > saturate and (
-                (y > 1 and ccd_data[ix, y - 1] < saturate)
+                (y >= 1 and ccd_data[ix, y - 1] < saturate)
                 or (y + 1 < ccd_data.shape[1] and ccd_data[ix, y + 1] < saturate)
             ):
                 bound = True
@@ -171,14 +171,17 @@ def cheat_cosmetics(image: Image, channel: str) -> Image:
 
         # But they also replace the data in CheatCosmetics in imagesnifs.cxx:769
         # with a linear interpolation in the x direction for each y value
-        for y in range(sec.y_min, sec.y_max):
-            intercept = 0
-            if sec.x_min > 0:
-                intercept = image.data[sec.x_min - 1, y]
-            slope = 0
-            if sec.x_max < image.data.shape[0] - 1:
-                slope = (image.data[sec.x_max, y] - intercept) / (sec.x_max - sec.x_min + 1)
-            fill_values = intercept + slope * np.arange(sec.x_min, sec.x_max)
-            image.data[sec.x_min : sec.x_max, y] = fill_values
+        intercept = (
+            np.zeros_like((1, sec.y_max - sec.y_min))
+            if sec.x_min == 0
+            else image.data[sec.x_min - 1, sec.y_min : sec.y_max][None, :]
+        )
+        slope = (
+            np.zeros((1, sec.y_max - sec.y_min))
+            if sec.x_max >= image.data.shape[0] - 1
+            else ((image.data[sec.x_max, sec.y_min : sec.y_max] - intercept) / (sec.x_max - sec.x_min + 1))
+        )
+        fill_values = intercept + slope * (np.arange(sec.x_min, sec.x_max) - sec.x_min + 1)[:, None]
+        image.data[sec.x_min : sec.x_max, sec.y_min : sec.y_max] = fill_values
 
     return image

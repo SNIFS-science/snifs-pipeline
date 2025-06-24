@@ -135,22 +135,22 @@ class Section(BaseModel):
         """Subtract another section from this one."""
         return Section(
             x_min=self.x_min - other.x_min,
-            x_max=self.x_max - other.x_max,
-            x_dir=self.x_dir * other.x_dir,
+            x_max=self.x_max - other.x_min,
+            x_dir=self.x_dir,
             y_min=self.y_min - other.y_min,
-            y_max=self.y_max - other.y_max,
-            y_dir=self.y_dir * other.y_dir,
+            y_max=self.y_max - other.y_min,
+            y_dir=self.y_dir,
         )
 
     def __add__(self, other: "Section") -> "Section":
         """Add another section to this one."""
         return Section(
             x_min=self.x_min + other.x_min,
-            x_max=self.x_max + other.x_max,
-            x_dir=self.x_dir * other.x_dir,
+            x_max=self.x_max + other.x_min,
+            x_dir=self.x_dir,
             y_min=self.y_min + other.y_min,
-            y_max=self.y_max + other.y_max,
-            y_dir=self.y_dir * other.y_dir,
+            y_max=self.y_max + other.y_min,
+            y_dir=self.y_dir,
         )
 
     @classmethod
