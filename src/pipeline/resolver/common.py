@@ -3,7 +3,7 @@ from datetime import timezone as tz
 from enum import StrEnum
 from functools import partial
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, overload
 
 import polars.selectors as cs
 from astropy.io import fits
@@ -16,7 +16,28 @@ UTCDatetime = Annotated[DateTime, False, "UTC", "ms"]
 DATETIME_CONVERSION_EXPR = cs.datetime().dt.cast_time_unit("ms").dt.convert_time_zone("UTC")
 
 
-def resolve_type(value: str | Path | None, info: ValidationInfo, file_type: "FileType") -> Path:
+@overload
+def resolve_type(
+    value: str | Path | None,
+    info: ValidationInfo,
+    file_type: "FileType",
+    must_match: bool = True,
+) -> Path: ...
+@overload
+def resolve_type(
+    value: str | Path | None,
+    info: ValidationInfo,
+    file_type: "FileType",
+    must_match: bool = False,
+) -> Path | None: ...
+
+
+def resolve_type(
+    value: str | Path | None,
+    info: ValidationInfo,
+    file_type: "FileType",
+    must_match: bool = True,
+) -> Path | None:
     from pipeline.tasks.build_filestore import build_filestore
 
     resolver = build_filestore(refresh=info.data.get("refresh_filestore", False))
@@ -24,7 +45,12 @@ def resolve_type(value: str | Path | None, info: ValidationInfo, file_type: "Fil
         return value
     if isinstance(value, str):
         return Path(value)
-    return resolver.get_match_path(file_type, info.data.get("primary_file"))
+    try:
+        return resolver.get_match_path(file_type, info.data.get("primary_file"))
+    except FileNotFoundError:
+        if must_match:
+            raise
+        return None
 
 
 class FileType(StrEnum):
@@ -45,6 +71,10 @@ class FileType(StrEnum):
     @property
     def Path(self) -> type[FilePath]:
         return Annotated[FilePath, BeforeValidator(partial(resolve_type, file_type=self))]  # type: ignore
+
+    @property
+    def OptionalPath(self) -> type[FilePath | None]:
+        return Annotated[FilePath | None, BeforeValidator(partial(resolve_type, file_type=self, must_match=False))]  # type: ignore
 
 
 class FileStoreModel(DataFrameModel):
@@ -131,7 +161,7 @@ def extra_details_from_fits(path: Path) -> dict[str, str | int | float | dt]:
                 values[column] = value
 
         values["num_extensions"] = len(hdul)
-        values["num_data_extensions"] = len([x for x in hdul if x.data is not None])
+        values["num_data_extensions"] = len([x for x in hdul if x.data is not None])  # type: ignore
     return values
 
 

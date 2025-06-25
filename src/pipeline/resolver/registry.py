@@ -31,13 +31,17 @@ class FileMatchRegistry:
         return func(input_entry, file_store)
 
     def get_match(
-        self, file_type: str | FileType, primary: FileStoreEntry | None, file_store: FileStoreDataFrame
+        self,
+        file_type: str | FileType,
+        primary: FileStoreEntry | None,
+        file_store: FileStoreDataFrame,
     ) -> FileStoreEntry:
         matches = self.get_matches(file_type, primary, file_store)
-        assert matches, (
-            f"No matches found for {file_type} for primary file "
-            f"{primary.model_dump_json(indent=2) if primary is not None else None}"
-        )
+        if not matches:
+            raise FileNotFoundError(
+                f"No matches found for {file_type} for primary file "
+                f"{primary.model_dump_json(indent=2) if primary is not None else None}"
+            )
         return matches[0]
 
 

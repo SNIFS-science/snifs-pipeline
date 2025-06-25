@@ -15,7 +15,8 @@ from pipeline.tasks.preprocessing.cosmetics import cheat_cosmetics, handle_speci
 from pipeline.tasks.preprocessing.flats import apply_custom_red_flat
 from pipeline.tasks.preprocessing.models import DarkModel, subtract_bias, subtract_dark
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
-from pipeline.tasks.preprocessing.plots import clear_output_path, plot
+from pipeline.tasks.preprocessing.plots import clear_output_path, plot, plot_bias_sections
+from pipeline.tasks.preprocessing.timeon import determine_timeon
 
 
 class PreprocessExposure(FlowConfig):
@@ -24,7 +25,8 @@ class PreprocessExposure(FlowConfig):
     bias_model_file: FileType.BIAS_MODEL.Path = Field(default=None)  # type: ignore
     dark_image_file: FileType.DARK.Path = Field(default=None)  # type: ignore
     dark_model_file: FileType.DARK_MODEL.Path = Field(default=None)  # type: ignore
-    flat_image_file: FileType.CONTINUUM.Path = Field(default=None)  # type: ignore
+    flat_image_file: FileType.CONTINUUM.OptionalPath = Field(default=None)
+    ccd_on_time_file: FileType.CCD_ON_TIMES.Path = Field(default=None)  # type: ignore
     binary_offset_model_file: FileType.BINARY_OFFSET_MODEL.Path = Field(default=None)  # type: ignore
     prefer_bias_image_over_model: bool = Field(default=True)
     use_dark_stack_if_possible: bool = Field(default=True)
@@ -56,7 +58,14 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     # Start the preprocessing pipeline
     images = load_all_data_extensions_with_headers(config.primary_file, transpose=True)
     primary_headers = load_headers(config.primary_file)
-    images = split_and_standardise(images)
+
+    # We need to augment the primary headers with some information. Namely, some of the files
+    # will have the time the detector was last switched on (needed for dark subtraction),
+    # but sometimes this information won't be present.
+    if "TIMEON" not in primary_headers:
+        primary_headers["TIMEON"] = determine_timeon(config.ccd_on_time_file, primary_headers)
+
+    images = split_and_standardise(images, primary.channel)
     images = handle_saturation(images)
 
     if len(images) == 2:  # Binary offset model is only derived for 2 chip models.
@@ -67,14 +76,19 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     images = add_overscan_variance(images)
     images = subtract_offset(images)
     image, primary_headers = assemble_bichip_to_image(images, primary_headers)
-    image = add_poisson_noise_to_variance(image)
 
     # You have two options for bias subtraction: either a bias image or a bias model.
     if config.prefer_bias_image_over_model:
         bias_reference = Image.from_fits_file(config.bias_image_file, transpose=True)
+
+        # Interestingly, if we have a bias image, we want to subtract is and *then* add the poisson noise.
+        image = subtract_bias(image, bias_reference, primary_headers)
+        image = add_poisson_noise_to_variance(image)
     else:
         bias_reference = DarkModel.model_validate_json(config.bias_model_file.read_text())
-    image = subtract_bias(image, bias_reference, primary_headers)
+        # But if we have a bias model, we want to add the poisson noise *before* subtracting the bias.
+        image = add_poisson_noise_to_variance(image)
+        image = subtract_bias(image, bias_reference, primary_headers)
 
     # The darks can use a model *with* a stacked image, so it's not either or.
     dark_model = DarkModel.model_validate_json(config.dark_model_file.read_text())
@@ -86,22 +100,28 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     if primary.channel == "R":
         image = handle_special_red_cosmetics(image, primary_headers)
     image = cheat_cosmetics(image, primary.channel)
-    image = debug_comparison(image, primary.channel)
 
-    if config.flat_image_file is not None:
+    # Apply the custom red flat if we can't find a flat at all, or we're processing a red flat.
+    if config.flat_image_file is not None and config.flat_image_file != config.primary_file:
         pass
     elif primary.channel == "R":
         image = apply_custom_red_flat(image)
 
+    image = debug_comparison(image, primary.channel)
+
     clear_output_path(primary)
-    # plot_bias_sections(primary)
+    plot_bias_sections(primary)
     plot_detailed_images(primary, start="subtract_bias")
 
 
 if __name__ == "__main__":
-    # file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_121_118/bias_red.fits"
-    file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_red.fits"
-    # file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_159_030/continuum_red.fits"
-    # file = Path(__file__).parents[2] / "data/raw/runs/run_id=25_057_001/continuum_blue.fits"
-    config = PreprocessExposure(primary_file=file)
-    preprocess_exposure(config)
+    raw_dir = Path(__file__).parents[2] / "data/raw"
+    files = [
+        raw_dir / "runs/run_id=25_121_118/bias_red.fits",
+        raw_dir / "runs/run_id=25_057_001/continuum_red.fits",
+        raw_dir / "runs/run_id=25_159_030/continuum_red.fits",
+        raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",
+    ]
+    for file in files:
+        config = PreprocessExposure(primary_file=file)
+        preprocess_exposure(config)

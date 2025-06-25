@@ -100,31 +100,27 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> t
     return final_image, primary_headers
 
 
-@plot()
-@pipeline_task()
-def split_and_standardise(images: list[Image]) -> list[Image]:
-    """Detcom (blue) comes in 2 extensions, one for each amplifier.
-    Otcom (red) has them together. We want them split. Additionally, various
-    parts of the headers for the upstream files are incorrect, and we need to override them here
-    """
-    if len(images) == 2:
-        # If this is a detcom file and thus has two extensions to start with, great!
-        # All we need to do then is standardise some header values and return the images.
-        for i, image in enumerate(images):
-            image.header["CCDNUM"] = i
-            image.header["GAIN"] = GAINS[image.header.get_str("CHANNEL")][i]
-            image.header["CCDNAMP"] = 1
-            image.header["SATURATE"] = image.header.get_int("CCD{i}SAT", 65535)
-            # As per algocams.cxx:125, detcom images drop the first 11 columns of overscan!
-            # The fact this is twelve below is because this is 1-indexed
-            # EDIT: Actually, going off the comment both detcom and otcom want 10 columns dropped?
-            # comment: remove a few pixels (10)
-            b, _, _ = image.get_bias_section()
-            image.header["BIASSEC"] = f"[{b.x_min + 10}:{b.x_max},{b.y_min + 1}:{b.y_max}]"
+def standardise_b_images(images: list[Image]) -> list[Image]:
+    # If this is a detcom file and thus has two extensions to start with, great!
+    # All we need to do then is standardise some header values and return the images.
+    for i, image in enumerate(images):
+        image.header["CCDNUM"] = i
+        image.header["GAIN"] = GAINS["B"][i]
+        image.header["CCDNAMP"] = 1
+        image.header["SATURATE"] = image.header.get_int("CCD{i}SAT", 65535)
+        # As per algocams.cxx:125, detcom images drop the first 11 columns of overscan!
+        # The fact this is twelve below is because this is 1-indexed
+        # EDIT: Actually, going off the comment both detcom and otcom want 10 columns dropped?
+        # comment: remove a few pixels (10)
+        b, _, _ = image.get_bias_section()
+        image.header["BIASSEC"] = f"[{b.x_min + 10}:{b.x_max},{b.y_min + 1}:{b.y_max}]"
 
-        return images
+    return images
+
+
+def standardise_r_images(images: list[Image]) -> list[Image]:
     image = images[0]
-    new_images = []
+    new_images: list[Image] = []
     num_amps = image.header.get_int("CCDNAMP", 2)
     assert num_amps == 2, f"Expected 2 amplifiers, got {num_amps}"
     full_data = image.get_data_section()  # TODO: standardise this
@@ -170,6 +166,20 @@ def split_and_standardise(images: list[Image]) -> list[Image]:
         new_images.append(Image.from_array_and_dict(chip_header, combined, np.zeros_like(combined, dtype=np.float64)))
 
     return new_images
+
+
+@plot()
+@pipeline_task()
+def split_and_standardise(images: list[Image], channel: str) -> list[Image]:
+    """Detcom (blue) comes in 2 extensions, one for each amplifier.
+    Otcom (red) has them together. We want them split. Additionally, various
+    parts of the headers for the upstream files are incorrect, and we need to override them here
+    """
+    if channel == "B":
+        return standardise_b_images(images)
+    elif channel == "R":
+        return standardise_r_images(images)
+    raise ValueError(f"Unknown channel {channel}. Expected 'B' or 'R'.")
 
 
 @plot()

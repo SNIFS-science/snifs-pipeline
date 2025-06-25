@@ -22,7 +22,7 @@ _BIAS_STORE: dict[str, list[Image]] = OrderedDict()
 
 P = ParamSpec("P")
 R = TypeVar("R")
-ZOOM_START = (1000, 100)
+ZOOM_START = (1000, 509 - 25)
 ZOOM_SIZE = (50, 50)
 ZOOM_END = (ZOOM_START[0] + ZOOM_SIZE[0], ZOOM_START[1] + ZOOM_SIZE[1])
 MIDLINE_X_COORD = ZOOM_START[0] + ZOOM_SIZE[0] // 2
