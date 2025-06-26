@@ -1,4 +1,5 @@
 import contextlib
+from collections import defaultdict
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
@@ -8,6 +9,7 @@ import cmasher as cmr
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
+import prefect
 from matplotlib.image import AxesImage
 from matplotlib.ticker import MaxNLocator
 
@@ -17,8 +19,8 @@ from pipeline.common.prefect_utils import pipeline_task
 from pipeline.resolver.common import FileStoreEntry
 from pipeline.tasks.common import Image, Section
 
-_IMAGE_STORE: dict[str, list[Image]] = OrderedDict()
-_BIAS_STORE: dict[str, list[Image]] = OrderedDict()
+_IMAGE_STORE: dict[str, dict[str, list[Image]]] = defaultdict(OrderedDict)
+_BIAS_STORE: dict[str, dict[str, list[Image]]] = defaultdict(OrderedDict)
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -96,14 +98,22 @@ def flatten_and_filter[T](inputs: Any, filter_type: type[T]) -> list[T]:
     return []
 
 
+def get_run_id() -> str:
+    try:
+        return prefect.context.FlowRunContext.get().flow_run.id
+    except Exception:
+        return "unknown"
+
+
 def plot():
     def decorate(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
         def inner(images: Image | list[Image], *args, **kwargs) -> Image | list[Image]:
-            if not _IMAGE_STORE:
-                _IMAGE_STORE["initial"] = flatten_and_filter(images, Image)
+            flow_run_id = get_run_id()
+            if not _IMAGE_STORE[flow_run_id]:
+                _IMAGE_STORE[flow_run_id]["initial"] = flatten_and_filter(images, Image)
             result = func(images, *args, **kwargs)  # type: ignore
-            _IMAGE_STORE[func.__name__] = flatten_and_filter(result, Image)
+            _IMAGE_STORE[flow_run_id][func.__name__] = flatten_and_filter(result, Image)
             return result
 
         return inner  # type: ignore
@@ -115,10 +125,11 @@ def plot_bias():
     def decorate(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
         def inner(images: Image | list[Image], *args, **kwargs) -> Image | list[Image]:
-            if not _BIAS_STORE:
-                _BIAS_STORE["initial"] = ensure_list(images)
+            flow_run_id = get_run_id()
+            if not _BIAS_STORE[flow_run_id]:
+                _BIAS_STORE[flow_run_id]["initial"] = ensure_list(images)
             result = func(images, *args, **kwargs)  # type: ignore
-            _BIAS_STORE[func.__name__] = ensure_list(result)
+            _BIAS_STORE[flow_run_id][func.__name__] = ensure_list(result)
             return result
 
         return inner  # type: ignore
@@ -129,11 +140,11 @@ def plot_bias():
 def log_image_data(name: str, images: Image | list[Image]) -> None:
     if isinstance(images, Image):
         images = [images]
+    flow_run_id = prefect.context.get_run_context().flow_run.id if prefect.context.get_run_context() else "unknown"
+    if not _IMAGE_STORE[flow_run_id]:
+        _IMAGE_STORE[flow_run_id]["initial"] = images
 
-    if not _IMAGE_STORE:
-        _IMAGE_STORE["initial"] = images
-
-    _IMAGE_STORE[name] = images
+    _IMAGE_STORE[flow_run_id][name] = images
 
 
 def extract_zoom(data: np.ndarray) -> np.ndarray:
@@ -220,13 +231,14 @@ def plot_detailed_images(primary: FileStoreEntry, start: str | None = None) -> N
 
     prior_images = None
 
+    flow_run_id = get_run_id()
     if start is None:
-        store = _IMAGE_STORE
+        store = _IMAGE_STORE[flow_run_id]
     else:
-        assert start in _IMAGE_STORE, f"Start task '{start}' not found in _IMAGE_STORE."
+        assert start in _IMAGE_STORE[flow_run_id], f"Start task '{start}' not found in _IMAGE_STORE."
         store = {}
         found = False
-        for key, images in _IMAGE_STORE.items():
+        for key, images in _IMAGE_STORE[flow_run_id].items():
             if key == start:
                 found = True
             if found:
@@ -236,9 +248,6 @@ def plot_detailed_images(primary: FileStoreEntry, start: str | None = None) -> N
 
     output_path = determine_output_path(primary)
     title_prefix = determine_figure_prefix(primary)
-
-    all_data = np.concatenate([im.data.astype(np.float64).flatten() for images in store.values() for im in images])
-    min_c_data, max_c_data = np.nanpercentile(all_data, [1, 99])
 
     for i, (key, images) in enumerate(store.items()):
         title = f"{title_prefix} - {key}"
@@ -274,9 +283,11 @@ def plot_detailed_images(primary: FileStoreEntry, start: str | None = None) -> N
                 "interpolation": "none",
             }
 
-            imd = axd.imshow(data.T, cmap=CMAP_DATA, aspect="equal", vmin=min_c_data, vmax=max_c_data, **im_kw)
+            vmin, vmax = np.nanpercentile(data, [1, 99])
+            imd = axd.imshow(data.T, cmap=CMAP_DATA, aspect="equal", vmin=vmin, vmax=vmax, **im_kw)
             add_colorbar(f"Data {k}", fig, axd, imd)
-            imv = axv.imshow(variance.T, cmap=CMAP_DATA, aspect="equal", vmin=min_c_data, vmax=max_c_data, **im_kw)
+            vmin, vmax = np.nanpercentile(variance, [1, 99])
+            imv = axv.imshow(variance.T, cmap=CMAP_DATA, aspect="equal", vmin=vmin, vmax=vmax, **im_kw)
             add_colorbar(f"Variance {k}", fig, axv, imv)
 
             imdz = axdz.imshow(
@@ -420,9 +431,9 @@ def plot_bias_sections(primary_file: FileStoreEntry) -> None:
         return
 
     output_path = determine_output_path(primary_file)
-
+    flow_run_id = get_run_id()
     prior_images = None
-    for i, (key, images) in enumerate(_BIAS_STORE.items()):
+    for i, (key, images) in enumerate(_BIAS_STORE[flow_run_id].items()):
         fig, axes = plt.subplots(
             2,
             len(images),

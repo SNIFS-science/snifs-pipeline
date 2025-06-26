@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from pydantic import Field, FilePath
@@ -33,16 +34,25 @@ class PreprocessExposure(FlowConfig):
     refresh_filestore: bool = Field(default=True)
 
 
-# This nasty little code loads in the preprocessed fits file Daniel sent me, so we can compare the results
 @plot()
-def debug_comparison(image: Image, channel: str) -> Image:
+def debug_comparison(image: Image, channel: str, run_id: str | None, obstype: str) -> Image:
     import numpy as np
+
+    assert run_id is not None, "Run ID must be provided for debugging comparison."
 
     # 005 and 006 are R and B continuum
     # 011 are the arcs
-    file_name = "P25_057_001_005_07_R.fits" if channel == "R" else "P25_057_001_006_07_B.fits"
-    # file_name = "P25_159_030_005_07_R.fits" if channel == "R" else "P25_057_001_006_07_B.fits"
-    dan = Image.from_fits_file(Path(__file__).parents[2] / f".data_dump/{file_name}", transpose=True)
+    data_dump_dir = Path(__file__).parents[2] / ".data_dump"
+    expected_pattern = f"P{run_id}_*_{channel}.fits"
+    found_files = list(data_dump_dir.glob(expected_pattern))
+    if len(found_files) > 1:
+        extra_match = f".*_011_0._{channel}.fits" if obstype == "ARC" else f".*_00[56]_0._{channel}.fits"
+        found_files = [f for f in found_files if re.match(extra_match, f.name)]
+    assert len(found_files) == 1, (
+        f"Expected exactly one file matching {expected_pattern}, found {len(found_files)}: {found_files}."
+    )
+    get_logger().info(f"Debugging comparison with file: {found_files[0]}")
+    dan = Image.from_fits_file(found_files[0], transpose=True)
     dan.variance[dan.variance > 1e6] = np.inf
     return dan
 
@@ -107,17 +117,16 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     elif primary.channel == "R":
         image = apply_custom_red_flat(image)
 
-    image = debug_comparison(image, primary.channel)
+    image = debug_comparison(image, primary.channel, primary.run_id, primary.type)
 
     clear_output_path(primary)
     plot_bias_sections(primary)
-    plot_detailed_images(primary, start="subtract_bias")
+    plot_detailed_images(primary)
 
 
 if __name__ == "__main__":
     raw_dir = Path(__file__).parents[2] / "data/raw"
     files = [
-        raw_dir / "runs/run_id=25_121_118/bias_red.fits",
         raw_dir / "runs/run_id=25_057_001/continuum_red.fits",
         raw_dir / "runs/run_id=25_159_030/continuum_red.fits",
         raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",

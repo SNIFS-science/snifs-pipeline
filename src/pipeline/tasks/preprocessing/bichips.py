@@ -46,9 +46,9 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> t
     variances = [image.get_data_section_variance() * (image.header.get_float("GAIN") ** 2) for image in images]
 
     # If not R channel, flip the first amplifier in the X direction
-    if channel != "R":
-        datas[0] = datas[0][::-1, :]
-        variances[0] = variances[0][::-1, :]
+    # if channel != "R":
+    #     datas[0] = datas[0][::-1, :]
+    #     variances[0] = variances[0][::-1, :]
 
     # The second amplifier is always flipped in the x direction
     datas[1] = datas[1][::-1, :]
