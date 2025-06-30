@@ -1,8 +1,7 @@
 import numpy as np
 
-from pipeline.common.prefect_utils import pipeline_task
-from pipeline.tasks.common import Image, flag_skip
-from pipeline.tasks.preprocessing.plots import plot
+from pipeline.common import Image, flag_skip, pipeline_task
+from pipeline.tasks.preprocessing import plot
 
 
 @flag_skip("POISNOIS")

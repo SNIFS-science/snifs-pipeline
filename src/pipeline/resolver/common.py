@@ -53,6 +53,11 @@ def resolve_type(
         return None
 
 
+class PipelineStage(StrEnum):
+    RAW = "0_RAW"
+    PREPROCESSED = "1_PREPROCESSED"
+
+
 class FileType(StrEnum):
     SCIENCE = "OBJECT"
     CONTINUUM = "FLAT"

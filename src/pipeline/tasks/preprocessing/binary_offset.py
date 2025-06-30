@@ -3,9 +3,8 @@ from pathlib import Path
 
 import numpy as np
 
-from pipeline.common.prefect_utils import pipeline_task
-from pipeline.tasks.common import Image
-from pipeline.tasks.preprocessing.plots import plot
+from pipeline.common import Image, pipeline_task
+from pipeline.tasks.preprocessing import plot
 
 
 def count_bits(x: np.ndarray) -> np.ndarray:

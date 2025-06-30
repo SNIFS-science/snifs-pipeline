@@ -1,12 +1,7 @@
 import numpy as np
 
-from pipeline.common.prefect_utils import pipeline_task
-from pipeline.tasks.common import (
-    Headers,
-    Image,
-    listify,
-)
-from pipeline.tasks.preprocessing.plots import plot
+from pipeline.common import Headers, Image, listify, pipeline_task
+from pipeline.tasks.preprocessing import plot
 
 GAINS = {
     "B": [0.773, 0.744],
@@ -42,8 +37,8 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> t
         images = images[::-1]  # Reverse the order of the images
 
     # Go through and reverse directions as needed
-    datas = [image.get_data_section() * image.header.get_float("GAIN") for image in images]
-    variances = [image.get_data_section_variance() * (image.header.get_float("GAIN") ** 2) for image in images]
+    datas = [image.get_data_section()[1] * image.header.get_float("GAIN") for image in images]
+    variances = [image.get_data_section()[2] * (image.header.get_float("GAIN") ** 2) for image in images]
 
     # If not R channel, flip the first amplifier in the X direction
     # if channel != "R":
@@ -123,13 +118,11 @@ def standardise_r_images(images: list[Image]) -> list[Image]:
     new_images: list[Image] = []
     num_amps = image.header.get_int("CCDNAMP", 2)
     assert num_amps == 2, f"Expected 2 amplifiers, got {num_amps}"
-    full_data = image.get_data_section()  # TODO: standardise this
+    _, full_data, _ = image.get_data_section()  # TODO: standardise this
     n_data = full_data.shape[0] // num_amps
     _, full_bias, _ = image.get_bias_section()
     n_bias = full_bias.shape[0] // num_amps
     for i in range(num_amps):
-        # data_array = extract_section_from_label(data.data, data.header.get_str(f"DATASEC{i}"))
-        # bias_array = extract_section_from_label(data.data, data.header.get_str(f"BIASSEC{i}"))
         # Ha - psyche! You can't use the DATASEC and BIASSEC index keywords, they're wrong!
         # Instead just cut the data and bias up!
         data_array = full_data[i * n_data : (i + 1) * n_data, :]

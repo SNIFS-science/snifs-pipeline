@@ -1,23 +1,37 @@
 import re
+from functools import cached_property
 from pathlib import Path
 
-from pydantic import Field, FilePath
+from pydantic import Field, FilePath, computed_field
 
+from pipeline.common.image import Image
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
-from pipeline.resolver.common import FileType
+from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.tasks.build_filestore import FlowConfig
-from pipeline.tasks.common import Image, load_all_data_extensions_with_headers, load_headers
-from pipeline.tasks.preprocessing import plot_detailed_images
-from pipeline.tasks.preprocessing.bichips import assemble_bichip_to_image, handle_saturation, split_and_standardise
-from pipeline.tasks.preprocessing.binary_offset import correct_binary_offset
-from pipeline.tasks.preprocessing.common import add_poisson_noise_to_variance, ensure_float64
-from pipeline.tasks.preprocessing.cosmetics import cheat_cosmetics, handle_special_red_cosmetics
-from pipeline.tasks.preprocessing.flats import apply_custom_red_flat
-from pipeline.tasks.preprocessing.models import DarkModel, subtract_bias, subtract_dark
-from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
-from pipeline.tasks.preprocessing.plots import clear_output_path, plot, plot_bias_sections
-from pipeline.tasks.preprocessing.timeon import determine_timeon
+from pipeline.tasks.loaders import load_headers, load_images_from_file
+from pipeline.tasks.preprocessing import (
+    DarkModel,
+    add_overscan_variance,
+    add_poisson_noise_to_variance,
+    apply_custom_red_flat,
+    assemble_bichip_to_image,
+    cheat_cosmetics,
+    clear_output_path,
+    correct_binary_offset,
+    correct_even_odd,
+    determine_timeon,
+    ensure_float64,
+    handle_saturation,
+    handle_special_red_cosmetics,
+    plot,
+    plot_bias_sections,
+    plot_detailed_images,
+    split_and_standardise,
+    subtract_bias,
+    subtract_dark,
+    subtract_offset,
+)
 
 
 class PreprocessExposure(FlowConfig):
@@ -32,6 +46,20 @@ class PreprocessExposure(FlowConfig):
     prefer_bias_image_over_model: bool = Field(default=True)
     use_dark_stack_if_possible: bool = Field(default=True)
     refresh_filestore: bool = Field(default=True)
+
+    @cached_property
+    def output_folder(self) -> Path:
+        primary = config.fetch_metadata(config.primary_file)
+
+        return (
+            self.resolver.output_path
+            / f"processed_runs/run_id={primary.run_id}/obstype={primary.type}/channel={primary.channel}"
+        )
+
+    @computed_field
+    @property
+    def output_file(self) -> Path:
+        return self.output_folder / f"{PipelineStage.PREPROCESSED.value}.fits"
 
 
 @plot()
@@ -58,15 +86,15 @@ def debug_comparison(image: Image, channel: str, run_id: str | None, obstype: st
 
 
 @pipeline_flow()
-def preprocess_exposure(config: PreprocessExposure) -> None:
+def preprocess_exposure(config: PreprocessExposure) -> Path:
     logger = get_logger()
     primary = config.fetch_metadata(config.primary_file)
     logger.info(f"Starting preprocessing with settings:\n{config.model_dump_json(indent=2)}\n")
     logger.info(f"Primary file:\n{primary.model_dump_json(indent=2)}\n")
     assert primary.channel is not None, "Primary file must have a channel defined in the headers."
+    clear_output_path(config.output_folder)
 
-    # Start the preprocessing pipeline
-    images = load_all_data_extensions_with_headers(config.primary_file, transpose=True)
+    images = load_images_from_file(config.primary_file, transpose=True)
     primary_headers = load_headers(config.primary_file)
 
     # We need to augment the primary headers with some information. Namely, some of the files
@@ -117,11 +145,13 @@ def preprocess_exposure(config: PreprocessExposure) -> None:
     elif primary.channel == "R":
         image = apply_custom_red_flat(image)
 
-    image = debug_comparison(image, primary.channel, primary.run_id, primary.type)
+    debug_comparison(image, primary.channel, primary.run_id, primary.type)
 
-    clear_output_path(primary)
-    plot_bias_sections(primary)
-    plot_detailed_images(primary)
+    image.to_fits(config.output_file, primary_headers)
+    plot_bias_sections(primary, config.output_folder)
+    plot_detailed_images(primary, config.output_folder)
+
+    return config.output_file
 
 
 if __name__ == "__main__":

@@ -14,10 +14,10 @@ from matplotlib.image import AxesImage
 from matplotlib.ticker import MaxNLocator
 
 from pipeline import settings
+from pipeline.common.image import Image, Section
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_task
 from pipeline.resolver.common import FileStoreEntry
-from pipeline.tasks.common import Image, Section
 
 _IMAGE_STORE: dict[str, dict[str, list[Image]]] = defaultdict(OrderedDict)
 _BIAS_STORE: dict[str, dict[str, list[Image]]] = defaultdict(OrderedDict)
@@ -50,21 +50,11 @@ CMAP_ZOOM = cmr.rainforest
 CMAP_DIFF = cmr.prinsenvlag
 
 
-def clear_output_path(primary: FileStoreEntry) -> None:
+def clear_output_path(output_path: Path) -> None:
     """Clear the output path for the given primary file."""
-    output_path = determine_output_path(primary)
     if output_path.exists():
-        [f.unlink() for f in output_path.glob("*") if f.is_file()]
-        get_logger().info(f"Cleared output path: {output_path}")
-
-
-def determine_output_path(primary: FileStoreEntry) -> Path:
-    run_id = "run_id=" + (primary.run_id or "unknown")
-    channel = "channel=" + (primary.channel or "unknown")
-    obstype = "obstype=" + (primary.type.value or "unknown")
-    output_path = settings.output_path / "plots" / run_id / obstype / channel
-    output_path.mkdir(parents=True, exist_ok=True)
-    return output_path
+        [f.unlink() for f in output_path.glob("*")]
+    get_logger().info(f"Cleared output path: {output_path}")
 
 
 def determine_figure_prefix(primary: FileStoreEntry) -> str:
@@ -220,7 +210,7 @@ def get_vrange(data: np.ndarray) -> tuple[float, float]:
 
 
 @pipeline_task()
-def plot_detailed_images(primary: FileStoreEntry, start: str | None = None) -> None:  # noqa: C901
+def plot_detailed_images(primary: FileStoreEntry, output_path: Path, start: str | None = None) -> None:  # noqa: C901
     # TODO: full image run id, type, channel on image itself
     # TODO: add a dotted fun box around the biassec if it exists
     """Plot the images in the data store."""
@@ -246,7 +236,6 @@ def plot_detailed_images(primary: FileStoreEntry, start: str | None = None) -> N
             else:
                 prior_images = images
 
-    output_path = determine_output_path(primary)
     title_prefix = determine_figure_prefix(primary)
 
     for i, (key, images) in enumerate(store.items()):
@@ -414,7 +403,7 @@ def plot_detailed_images(primary: FileStoreEntry, start: str | None = None) -> N
             axxddl.set_xlabel("ΔData columns", fontsize=8)
             axyvdl.set_xlabel("ΔVariance rows", fontsize=8)
             axxvdl.set_xlabel("ΔVariance columns", fontsize=8)
-        output_location = output_path / f"{i}_{key}.webp"
+        output_location = output_path / f"preprocessing_detailed_{i}_{key}.webp"
         logger.info(f"Saving plot to {output_location}")
         fig.savefig(output_location, dpi=600, bbox_inches="tight")
         plt.close(fig)
@@ -423,14 +412,13 @@ def plot_detailed_images(primary: FileStoreEntry, start: str | None = None) -> N
 
 
 @pipeline_task()
-def plot_bias_sections(primary_file: FileStoreEntry) -> None:
+def plot_bias_sections(primary_file: FileStoreEntry, output_folder: Path) -> None:
     """Plot the bias section of the images."""
     logger = get_logger()
     if not settings.plot:
         logger.info("Plotting is disabled. Skipping bias section plot generation.")
         return
 
-    output_path = determine_output_path(primary_file)
     flow_run_id = get_run_id()
     prior_images = None
     for i, (key, images) in enumerate(_BIAS_STORE[flow_run_id].items()):
@@ -495,6 +483,6 @@ def plot_bias_sections(primary_file: FileStoreEntry) -> None:
 
         prior_images = images
 
-        output_location = output_path / f"bias_{i}_{key}.png"
+        output_location = output_folder / f"bias_{i}_{key}.png"
         logger.info(f"Saving bias section plot to {output_location}")
         fig.savefig(output_location, dpi=900, bbox_inches="tight")

@@ -1,5 +1,4 @@
-from pipeline.common.prefect_utils import pipeline_task
-from pipeline.tasks.common import Image, Section
+from pipeline.common import Image, Section, pipeline_task
 from pipeline.tasks.preprocessing.plots import plot
 
 RED_HFFF_LINES = [

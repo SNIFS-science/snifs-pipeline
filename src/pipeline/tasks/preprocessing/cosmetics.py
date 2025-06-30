@@ -1,8 +1,6 @@
 import numpy as np
 
-from pipeline.common.log import get_logger
-from pipeline.common.prefect_utils import pipeline_task
-from pipeline.tasks.common import Headers, Image, Section
+from pipeline.common import Headers, Image, Section, get_logger, pipeline_task
 from pipeline.tasks.preprocessing.plots import plot
 
 # Reminder that sections are not end-inclusive

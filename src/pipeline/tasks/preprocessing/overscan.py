@@ -2,10 +2,8 @@ import numpy as np
 from scipy.ndimage import median_filter
 from scipy.stats import linregress
 
-from pipeline.common.log import get_logger
-from pipeline.common.prefect_utils import pipeline_task
-from pipeline.tasks.common import Image, flag_skip, listify
-from pipeline.tasks.preprocessing.plots import plot, plot_bias
+from pipeline.common import Image, flag_skip, get_logger, listify, pipeline_task
+from pipeline.tasks.preprocessing import plot, plot_bias
 
 
 @plot_bias()
