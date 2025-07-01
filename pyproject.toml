@@ -12,6 +12,7 @@ dependencies = [
     "asdf>=4.2.0",
     "astropy>=7.0.1",
     "cmasher>=1.9.2",
+    "gitpython>=3.1.44",
     "loguru>=0.7.3",
     "matplotlib>=3.10.1",
     "numpy>=2.2.4",

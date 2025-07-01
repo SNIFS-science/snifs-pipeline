@@ -1,7 +1,7 @@
 import numpy as np
 
-from pipeline.common import Headers, Image, Section, get_logger, pipeline_task
-from pipeline.tasks.preprocessing.plots import plot
+from pipeline.common import Image, Section, get_logger, pipeline_task
+from pipeline.tasks.plotting.plots import plot
 
 # Reminder that sections are not end-inclusive
 BAD_PIXELS = {
@@ -32,7 +32,7 @@ SPECIAL_ERROR_FAST = 0.18
 
 @plot()
 @pipeline_task()
-def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Image:  # noqa: C901
+def handle_special_red_cosmetics(image: Image) -> Image:  # noqa: C901
     """Please don't ever ask me why anything in this function is the way it is."""
     logger = get_logger()
     image = image.copy()
@@ -40,7 +40,7 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
     # Please don't ask me why this is SATURAT1. See imagesnifs.cxx:860 and weep with me
     # Sam: alright the code doesnt make sense with SATURAT1, so Im guessing this must be a fits header array
     # flattening thing going on. Regardless, the bad x values are on the second amp reading
-    saturate = primary_headers.get_float_list("SATURATE")[1]
+    saturate = image.header.get_float_list("SATURATE")[1]
 
     bad_xs = [1575, 1580]
     for i, bad_x_initial in enumerate(bad_xs):
@@ -150,6 +150,9 @@ def handle_special_red_cosmetics(image: Image, primary_headers: Headers) -> Imag
             # Fine. I'm simplifying. No fancy checks using the variance only to blow it up. Use path on 1019
             ccd_data[ix, :y_beg] -= correction
             ccd_var[ix, :y_beg] = np.inf
+    image.add_function_lineage(
+        "Applied special red cosmetics to image. This is a nasty hack to fix bad pixels in the red channel."
+    )
     return image
 
 
@@ -181,5 +184,5 @@ def cheat_cosmetics(image: Image, channel: str) -> Image:
         )
         fill_values = intercept + slope * (np.arange(sec.x_min, sec.x_max) - sec.x_min + 1)[:, None]
         image.data[sec.x_min : sec.x_max, sec.y_min : sec.y_max] = fill_values
-
+    image.add_function_lineage(f"Applied cheat cosmetics to image for channel {channel}.")
     return image

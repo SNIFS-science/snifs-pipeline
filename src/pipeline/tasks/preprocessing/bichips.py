@@ -1,7 +1,7 @@
 import numpy as np
 
 from pipeline.common import Headers, Image, listify, pipeline_task
-from pipeline.tasks.preprocessing import plot
+from pipeline.tasks.plotting import plot
 
 GAINS = {
     "B": [0.773, 0.744],
@@ -12,7 +12,7 @@ GAINS = {
 
 @plot()
 @pipeline_task()
-def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> tuple[Image, Headers]:
+def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> Image:
     """Ensures we have a 2048x4096 exposure image from the raw file.
 
     The first thing we need to do is ensure that we load in the data in the same format.
@@ -84,15 +84,17 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> t
         if key in primary_headers:
             del primary_headers[key]  # These are not needed in the final header
 
-    combined_header = Headers.merge_all(*[image.header for image in images])
+    combined_header = Headers.merge_all(*[image.header for image in images], primary_headers)
     # Ensure certain keys are not in the header
     for key in ["BIASSEC"]:
         if key in combined_header:
             del combined_header[key]
     combined_header["CCDSEC"] = f"[1:{compound_data.shape[0]},1:{compound_data.shape[1]}]"
 
-    final_image = Image(data=compound_data, header=combined_header, variance=compound_variance)
-    return final_image, primary_headers
+    final_lineage = sorted([step for image in images for step in image.lineage], key=lambda x: x.time)
+    final_image = Image(data=compound_data, header=combined_header, variance=compound_variance, lineage=final_lineage)
+    final_image.add_function_lineage(f"Assembled bichip image from {len(images)} images with channel {channel}")
+    return final_image
 
 
 def standardise_b_images(images: list[Image]) -> list[Image]:
@@ -109,6 +111,7 @@ def standardise_b_images(images: list[Image]) -> list[Image]:
         # comment: remove a few pixels (10)
         b, _, _ = image.get_bias_section()
         image.header["BIASSEC"] = f"[{b.x_min + 10}:{b.x_max},{b.y_min + 1}:{b.y_max}]"
+        image.add_function_lineage("Standardise B channel image, including 10 pixel trim on BIASSEC")
 
     return images
 
@@ -156,7 +159,11 @@ def standardise_r_images(images: list[Image]) -> list[Image]:
             ),
             "CCDNUM": i,
         }
-        new_images.append(Image.from_array_and_dict(chip_header, combined, np.zeros_like(combined, dtype=np.float64)))
+        image = Image.from_array_and_dict(chip_header, combined, np.zeros_like(combined, dtype=np.float64))
+        image.add_function_lineage(
+            "Standardise R channel image, including 10 pixel trim on BIASSEC and flipping pixel direction"
+        )
+        new_images.append(image)
 
     return new_images
 
@@ -199,4 +206,8 @@ def handle_saturation(image: Image) -> Image:
     saturation_mask[:, :-1] |= saturation_mask[:, 1:]
     saturation_mask[:, 1:] |= saturation_mask[:, :-1]
     new_image.variance[saturation_mask] = np.inf
+    new_image.add_function_lineage(
+        f"Handle saturation at value {level} in the data by setting variance to infinity "
+        "for the pixel and also neighbouring pixels in the Y direction."
+    )
     return new_image

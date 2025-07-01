@@ -2,8 +2,8 @@ import numpy as np
 from scipy.ndimage import median_filter
 from scipy.stats import linregress
 
-from pipeline.common import Image, flag_skip, get_logger, listify, pipeline_task
-from pipeline.tasks.preprocessing import plot, plot_bias
+from pipeline.common import Image, flag_skip, listify, pipeline_task
+from pipeline.tasks.plotting import plot, plot_bias
 
 
 @plot_bias()
@@ -15,7 +15,6 @@ def correct_even_odd(image: Image) -> Image:
     """The odd-even effect is touched on in Emmanual Gangler's thesis, section 3.3.2
     which you can find in the docs/pdfs folder in this repository."""
     image = image.copy()
-    logger = get_logger()
     # TODO: It would be good to actually test this in case the "S->XFirst()" is a 0 or 1
     # TODO: to make sure we're not applying the odd-even the wrong way around.
     # TODO: this needs to be done on the bias section
@@ -50,7 +49,7 @@ def correct_even_odd(image: Image) -> Image:
 
     # We create the params to put in headers for historical purposes
     image.header["OEPARAM"] = [intercept, slope]
-    logger.info(f"Applied even-odd correction: slope={slope:0.5g}, intercept={intercept:0.4f} to image.")  # type: ignore
+    image.add_function_lineage(f"Applied even-odd correction: slope={slope:0.5g}, intercept={intercept:0.4f} to image.")
     return image
 
 
@@ -59,14 +58,13 @@ def correct_even_odd(image: Image) -> Image:
 @listify
 @flag_skip("OVSCNOIS")
 def add_overscan_variance(image: Image) -> Image:
-    logger = get_logger()
     image = image.copy()
     _, var, _ = image.get_bias_section()
     variance = np.mean(np.var(var[:, 1:-1], ddof=1, axis=0))
     rdnoise = np.sqrt(variance)
     image.header["RDNOISE"] = rdnoise
     image.variance += variance
-    logger.info(f"Added overscan variance: {variance:0.3f} to image (aka RDNOISE={rdnoise:0.3f} ADU).")
+    image.add_function_lineage(f"Added overscan variance: {variance:0.3f} to image (aka RDNOISE={rdnoise:0.3f} ADU).")
     return image
 
 
@@ -126,6 +124,6 @@ def subtract_offset(image: Image) -> Image:
     # ^ Don't ask me why it also compares to double the first difference.
     image.header["OVSCMED"] = overscan_median
     image.header["OVSCMAX"] = max_overscan
-    get_logger().info(f"Applied overscan correction: median={overscan_median:0.4f}, max={max_overscan:0.4f} to image.")
+    image.add_function_lineage(f"Applied overscan correction: median={overscan_median:0.4f}, max={max_overscan:0.4f}")
 
     return image

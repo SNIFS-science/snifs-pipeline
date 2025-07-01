@@ -91,14 +91,17 @@ class Headers(dict[str, str | bool | int | float | list[str] | list[int] | list[
         """
         Merge all headers into one.
         """
+        logger = get_logger()
         result = Headers()
         for header in headers:
             for key, value in header.items():
                 if key not in result:
                     result[key] = value
                 else:
-                    logger = get_logger()
-                    logger.debug(f"Header {key} already exists. Overwriting with {value}")
+                    logger.debug(
+                        f"Header {key} already exists. Overwriting old value {result[key]} with new value {value}"
+                    )
+                    result[key] = value
         return result
 
     def merge(self, other: "Headers") -> "Headers":
@@ -112,6 +115,12 @@ class Headers(dict[str, str | bool | int | float | list[str] | list[int] | list[
 
     def copy(self) -> "Headers":
         return Headers(**self)
+
+    def to_dict(self) -> dict[str, str | bool | int | float | list[str] | list[int] | list[float]]:
+        """
+        Convert the header to a dictionary.
+        """
+        return {k: v for k, v in self.items() if v is not None}
 
     def to_astropy_header(self) -> Header:
         """
@@ -129,6 +138,13 @@ class Headers(dict[str, str | bool | int | float | list[str] | list[int] | list[
             else:
                 header[key[:8]] = value
         return header
+
+    @classmethod
+    def from_dict(cls, data: dict[str, str | bool | int | float | list[str] | list[int] | list[float]]) -> "Headers":
+        """
+        Create a Headers object from a dictionary.
+        """
+        return Headers(**data)
 
     @classmethod
     def from_astropy_header(cls, header: Header) -> "Headers":

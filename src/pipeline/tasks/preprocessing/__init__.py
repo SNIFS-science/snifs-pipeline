@@ -5,5 +5,4 @@ from pipeline.tasks.preprocessing.cosmetics import cheat_cosmetics, handle_speci
 from pipeline.tasks.preprocessing.flats import apply_custom_red_flat
 from pipeline.tasks.preprocessing.models import DarkModel, subtract_bias, subtract_dark
 from pipeline.tasks.preprocessing.overscan import add_overscan_variance, correct_even_odd, subtract_offset
-from pipeline.tasks.preprocessing.plots import clear_output_path, plot, plot_bias_sections, plot_detailed_images
 from pipeline.tasks.preprocessing.timeon import determine_timeon

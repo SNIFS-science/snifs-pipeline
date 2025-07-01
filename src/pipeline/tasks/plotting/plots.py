@@ -14,9 +14,7 @@ from matplotlib.image import AxesImage
 from matplotlib.ticker import MaxNLocator
 
 from pipeline import settings
-from pipeline.common.image import Image, Section
-from pipeline.common.log import get_logger
-from pipeline.common.prefect_utils import pipeline_task
+from pipeline.common import Image, Section, get_logger, pipeline_task
 from pipeline.resolver.common import FileStoreEntry
 
 _IMAGE_STORE: dict[str, dict[str, list[Image]]] = defaultdict(OrderedDict)
@@ -48,13 +46,6 @@ LINES_Y: dict[int, str] = {
 CMAP_DATA = cmr.torch
 CMAP_ZOOM = cmr.rainforest
 CMAP_DIFF = cmr.prinsenvlag
-
-
-def clear_output_path(output_path: Path) -> None:
-    """Clear the output path for the given primary file."""
-    if output_path.exists():
-        [f.unlink() for f in output_path.glob("*")]
-    get_logger().info(f"Cleared output path: {output_path}")
 
 
 def determine_figure_prefix(primary: FileStoreEntry) -> str:

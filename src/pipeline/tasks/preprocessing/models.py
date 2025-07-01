@@ -1,8 +1,8 @@
 import numpy as np
 from pydantic import BaseModel
 
-from pipeline.common import Headers, Image, Section, flag_skip, get_logger, pipeline_task
-from pipeline.tasks.preprocessing import plot
+from pipeline.common import Image, Section, flag_skip, get_logger, pipeline_task
+from pipeline.tasks.plotting import plot
 
 BOLTZMANN_CONSTANT = 8.617333262145e-5  # eV/K
 ABS_ZERO = 273.15  # Celsius to Kelvin conversion factor
@@ -54,46 +54,53 @@ class DarkModel(BaseModel):
 @flag_skip("BIASDONE")
 @plot()
 @pipeline_task()
-def subtract_bias(image: Image, reference: Image | DarkModel, primary_headers: Headers) -> Image:
+def subtract_bias(image: Image, reference: Image | DarkModel) -> Image:
     if isinstance(reference, DarkModel):
-        return subtract_bias_model(image, reference, primary_headers)
+        return subtract_bias_model(image, reference)
     elif isinstance(reference, Image):
         return subtract_bias_image(image, reference)
     raise ValueError(f"Reference must be either a DarkModel or an Image, got {type(reference)} instead.")
 
 
-def subtract_bias_model(image: Image, model: DarkModel, primary_headers: Headers) -> Image:
+def subtract_bias_model(image: Image, model: DarkModel) -> Image:
     """Subtracts bias model following imagesnifs.cxx:298"""
-    detector_temp = primary_headers.get_float("DETTEMP")
-    time_on_str = primary_headers.get_optional_str("TIMEON")
+    detector_temp = image.header.get_float("DETTEMP")
+    time_on_str = image.header.get_optional_str("TIMEON")
     time_on = float(time_on_str) if time_on_str is not None and "." in time_on_str else None
 
+    original = image.data
     image = image.copy()
     for s in model.sections:
         to_remove = s.get_bias_sub(detector_temp, time_on)
         image.data[s.x_min : s.x_max, s.y_min : s.y_max] -= to_remove
+
+    mean_difference = np.mean(image.data - original)
+    image.add_function_lineage(f"Subtracted bias model with {detector_temp=}, {time_on=}, and {mean_difference=:.4f}")
     return image
 
 
 def subtract_bias_image(image: Image, bias_image: Image) -> Image:
     assert bias_image.header.get_bool("BIASFRAM"), "Bias image must have BIASFRAM set to True"
-    return image.subtract(bias_image)
+    new_image = image.subtract(bias_image)
+    mean_difference = np.mean(new_image.data - image.data)
+    new_image.add_function_lineage(f"Subtracted bias image with {mean_difference=:.4f} mean difference")
+    return new_image
 
 
 @flag_skip("DARKDONE")
 @plot()
 @pipeline_task()
-def subtract_dark(image: Image, model: DarkModel, dark_images: list[Image] | None, primary_headers: Headers) -> Image:
+def subtract_dark(image: Image, model: DarkModel, dark_images: list[Image] | None) -> Image:
     if dark_images is None:
-        return subtract_dark_model(image, model, primary_headers)
-    return subtract_dark_stack(image, dark_images, model, primary_headers)
+        return subtract_dark_model(image, model)
+    return subtract_dark_stack(image, dark_images, model)
 
 
-def subtract_dark_model(image: Image, model: DarkModel, primary_headers: Headers) -> Image:
-    detector_temp = primary_headers.get_float("DETTEMP")
-    time_on_str = primary_headers.get_optional_str("TIMEON")
+def subtract_dark_model(image: Image, model: DarkModel) -> Image:
+    detector_temp = image.header.get_float("DETTEMP")
+    time_on_str = image.header.get_optional_str("TIMEON")
     time_on = float(time_on_str) if time_on_str is not None and "." in time_on_str else None
-    dark_time = primary_headers.get_float("DARKTIME")
+    dark_time = image.header.get_float("DARKTIME")
 
     # This warning comes from imagesnifs.cxx:410
     if time_on is not None and time_on < dark_time:
@@ -101,14 +108,19 @@ def subtract_dark_model(image: Image, model: DarkModel, primary_headers: Headers
             f"TIMEON {time_on} is less than DARKTIME {dark_time}. This may lead to incorrect dark subtraction."
         )
 
+    original = image.data
     image = image.copy()
     for s in model.sections:
         to_remove = s.get_dark_sub(detector_temp, time_on, dark_time)
         image.data[s.x_min : s.x_max, s.y_min : s.y_max] -= to_remove
+    mean_difference = np.mean(image.data - original)
+    image.add_function_lineage(
+        f"Subtracted dark model with {detector_temp=}, {time_on=}, {dark_time=}, and {mean_difference=:.4f}"
+    )
     return image
 
 
-def subtract_dark_stack(image: Image, dark_images: list[Image], model: DarkModel, primary_headers: Headers) -> Image:
+def subtract_dark_stack(image: Image, dark_images: list[Image], model: DarkModel) -> Image:
     assert len(dark_images) == 3, "Dark stack must contain exactly 3 images (i0, i1, i2 terms)"
     for dark_image in dark_images:
         assert image.data.shape == dark_image.data.shape, (
@@ -121,16 +133,22 @@ def subtract_dark_stack(image: Image, dark_images: list[Image], model: DarkModel
     if not image.header.get_bool("OVSCDONE"):
         logger.warning("Image does not have OVSCDONE set, dark subtraction may not be correct.")
 
-    dark_time = primary_headers.get_float("DARKTIME")
-    time_on = primary_headers.get_float("TIMEON")
-    temperature = primary_headers.get_float("DETTEMP")
+    dark_time = image.header.get_float("DARKTIME")
+    time_on = image.header.get_float("TIMEON")
+    temperature = image.header.get_float("DETTEMP")
 
     coefficients = [
         section.i0 * dark_time,
         section.i1 * section.dark_time_term(dark_time=dark_time, time_on=time_on),
         section.i2 * section.temperature_term(temperature) * dark_time,
     ]
+    original = image.data
     for dark_image, coeff in zip(dark_images, coefficients, strict=True):
         logger.debug(f"Subtracting dark image with coefficient {coeff}")
         image = image.subtract(dark_image, coeff)
+
+    mean_difference = np.mean(image.data - original)
+    image.add_function_lineage(
+        f"Subtracted dark stack with {temperature=}, {time_on=}, {dark_time=}, and {mean_difference=:.4f}"
+    )
     return image

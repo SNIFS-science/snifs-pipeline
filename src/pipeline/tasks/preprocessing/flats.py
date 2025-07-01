@@ -1,5 +1,5 @@
 from pipeline.common import Image, Section, pipeline_task
-from pipeline.tasks.preprocessing.plots import plot
+from pipeline.tasks.plotting.plots import plot
 
 RED_HFFF_LINES = [
     {
@@ -50,4 +50,5 @@ def apply_custom_red_flat(image: Image) -> Image:
             amp_var[:, y - 1] = amp_var[:, y - 1] * factor**2 + amp_data[:, y - 1] ** 2 * RED_HFFFF_SIGMA**2
             amp_data[:, y - 1] *= factor
 
+    image.add_function_lineage("Applied custom red flat to image.")
     return image

@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 
 from pipeline.common import Image, pipeline_task
-from pipeline.tasks.preprocessing import plot
+from pipeline.tasks.plotting import plot
 
 
 def count_bits(x: np.ndarray) -> np.ndarray:
@@ -127,6 +127,8 @@ def correct_binary_offset(images: list[Image], bom_path: Path) -> list[Image]:
     images[0].data[:3, :] -= column_means
     images[1].data[:3, :] -= column_mean_other
 
+    for image in images:
+        image.add_function_lineage(f"Corrected binary offset using the binary offset model from {bom_path}")
     return images
 
 
