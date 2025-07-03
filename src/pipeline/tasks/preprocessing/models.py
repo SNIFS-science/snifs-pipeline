@@ -1,9 +1,12 @@
+from pathlib import Path
+
 import numpy as np
 from pydantic import BaseModel
 
 from pipeline.common import Image, Section, flag_skip, get_logger, pipeline_task
 from pipeline.tasks.plotting import plot
 from pipeline.tasks.plotting.plots import plot_standalone
+from pipeline.tasks.preprocessing.common import add_poisson_noise_to_variance
 
 BOLTZMANN_CONSTANT = 8.617333262145e-5  # eV/K
 ABS_ZERO = 273.15  # Celsius to Kelvin conversion factor
@@ -52,6 +55,42 @@ class DarkModel(BaseModel):
     sections: list[DarkModelSection]
 
 
+def subtract_bias_and_add_poisson(
+    image: Image,
+    prefer_bias_image_over_model: bool,
+    bias_image_file: Path | None = None,
+    bias_model_file: Path | None = None,
+) -> Image:
+    # You have two options for bias subtraction: either a bias image or a bias model.
+    if prefer_bias_image_over_model and bias_image_file is not None:
+        bias_reference = Image.from_fits_file(bias_image_file, transpose=True)
+
+        # Interestingly, if we have a bias image, we want to subtract is and *then* add the poisson noise.
+        image = subtract_bias(image, bias_reference)
+        return add_poisson_noise_to_variance(image)
+    elif bias_model_file is not None:
+        bias_reference = DarkModel.model_validate_json(bias_model_file.read_text())
+        # But if we have a bias model, we want to add the poisson noise *before* subtracting the bias.
+        image = add_poisson_noise_to_variance(image)
+        return subtract_bias(image, bias_reference)
+    else:
+        raise ValueError(
+            "No bias image or bias model provided. Please provide either a bias image file or a bias model file."
+        )
+
+
+def subtract_dark(
+    image: Image, dark_model_file: Path, dark_image_file: Path | None = None, use_dark_stack_if_possible: bool = True
+) -> Image:
+    # The darks can use a model *with* a stacked image, so it's not either or.
+    dark_model = DarkModel.model_validate_json(dark_model_file.read_text())
+    dark_images = None
+    if use_dark_stack_if_possible and dark_image_file is not None:
+        dark_images = Image.stack_from_fits_file(dark_image_file, transpose=True)
+        return subtract_dark_stack(image, dark_images, dark_model)
+    return subtract_dark_model(image, dark_model)
+
+
 @flag_skip("BIASDONE")
 @plot()
 @pipeline_task()
@@ -92,13 +131,7 @@ def subtract_bias_image(image: Image, bias_image: Image) -> Image:
 @flag_skip("DARKDONE")
 @plot()
 @pipeline_task()
-@plot_standalone("subtract_dark")
-def subtract_dark(image: Image, model: DarkModel, dark_images: list[Image] | None) -> Image:
-    if dark_images is None:
-        return subtract_dark_model(image, model)
-    return subtract_dark_stack(image, dark_images, model)
-
-
+@plot_standalone("subtract_dark_model")
 def subtract_dark_model(image: Image, model: DarkModel) -> Image:
     detector_temp = image.header.get_float("DETTEMP")
     time_on_str = image.header.get_optional_str("TIMEON")
@@ -123,6 +156,10 @@ def subtract_dark_model(image: Image, model: DarkModel) -> Image:
     return image
 
 
+@flag_skip("DARKDONE")
+@plot()
+@pipeline_task()
+@plot_standalone("subtract_dark_stack")
 def subtract_dark_stack(image: Image, dark_images: list[Image], model: DarkModel) -> Image:
     assert len(dark_images) == 3, "Dark stack must contain exactly 3 images (i0, i1, i2 terms)"
     for dark_image in dark_images:

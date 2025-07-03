@@ -46,7 +46,7 @@ LINES_Y: dict[int, str] = {
     2048: "#fb7185",
     4090: "#ffafbb",
 }
-CMAP_DATA = cmr.torch
+CMAP_DATA = cmr.get_sub_cmap("cmr.torch", 0, 0.95)
 CMAP_ZOOM = cmr.rainforest
 CMAP_DIFF = cmr.prinsenvlag
 
