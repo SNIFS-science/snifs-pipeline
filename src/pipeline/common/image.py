@@ -220,7 +220,7 @@ class Image(BaseModel):
             }
         )
 
-        af.write_to(asdf_file, all_array_compression="zlib")
+        af.write_to(asdf_file, all_array_compression="lz4")
 
     @classmethod
     def from_asdf(cls, asdf_file: Path | str) -> "Image":

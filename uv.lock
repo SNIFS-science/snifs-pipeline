@@ -1183,6 +1183,16 @@ wheels = [
 ]
 
 [[package]]
+name = "pycosmic"
+version = "0.6"
+source = { git = "https://github.com/brandherd/PyCosmic#7cd5a0e2f08277d870842a9ce6652dba07375695" }
+dependencies = [
+    { name = "astropy" },
+    { name = "numpy" },
+    { name = "scipy" },
+]
+
+[[package]]
 name = "pycparser"
 version = "2.22"
 source = { registry = "https://pypi.org/simple" }
@@ -1667,6 +1677,7 @@ dependencies = [
     { name = "pandera" },
     { name = "polars" },
     { name = "prefect" },
+    { name = "pycosmic" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "scipy" },
@@ -1691,6 +1702,7 @@ requires-dist = [
     { name = "pandera", specifier = ">=0.23.1" },
     { name = "polars", specifier = ">=1.26.0" },
     { name = "prefect", specifier = ">=3.3.1" },
+    { name = "pycosmic", git = "https://github.com/brandherd/PyCosmic" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pydantic-settings", specifier = ">=2.8.1" },
     { name = "scipy", specifier = ">=1.15.3" },

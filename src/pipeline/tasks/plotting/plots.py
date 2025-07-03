@@ -61,9 +61,9 @@ def determine_figure_prefix(primary: FileStoreEntry) -> str:
 
 def determine_figure_prefix_from_header(image: Image) -> str:
     """Determine the figure title based on the primary file's metadata."""
-    run_id = image.header.get_optional_str("run_id", "unknown")
-    channel = image.header.get_optional_str("channel", "unknown")
-    obstype = image.header.get_optional_str("obstype", "unknown")
+    run_id = image.header.get_optional_str("RUNID", "unknown")
+    channel = image.header.get_optional_str("CHANNEL", "unknown")
+    obstype = image.header.get_optional_str("OBSTYPE", "unknown")
     return f"{obstype=} - {run_id=} - {channel=}"
 
 
@@ -229,26 +229,22 @@ def plot_standalone_func(images: Image | list[Image], key: str) -> None:  # noqa
         logger.warning("No images to plot.")
         return
 
+    num_cols = 2 * len(images)
+    title_prefix = determine_figure_prefix_from_header(images[0])
+    flow_run_id = get_run_id()
+    _STANDALONE_ORDERING[flow_run_id] += 1
+    title = f"{title_prefix} - {key}"
+    aspect_ratio = images[0].data.shape[1] / images[0].data.shape[0]
+
+    fig, axes = plt.subplots(
+        1,
+        num_cols,
+        figsize=(num_cols * 3 + 1.5, 3 * aspect_ratio + 1.5),
+        gridspec_kw={"hspace": 0.1, "wspace": 0.1},
+    )
+    axes[0].annotate(title, xy=(0, 1.01), xycoords="axes fraction", ha="left", va="bottom", fontsize=6)
     for i, image in enumerate(images):
-        title_prefix = determine_figure_prefix_from_header(image)
-
-        flow_run_id = get_run_id()
-        _STANDALONE_ORDERING[flow_run_id] += 1
-
-        title = f"{title_prefix} - {key}"
-        if len(images) > 1:
-            title += f" ({i + 1}/{len(images)})"
-        num_cols = 2
-        aspect_ratio = image.data.shape[1] / image.data.shape[0]
-
-        fig, axes = plt.subplots(
-            1,
-            num_cols,
-            figsize=(2 * 3 + 1.5, 3 * aspect_ratio + 1.5),
-            gridspec_kw={"hspace": 0.1, "wspace": 0.1},
-        )
-        axes[0].annotate(title, xy=(0, 1.01), xycoords="axes fraction", ha="left", va="bottom", fontsize=10)
-        axd, axv = axes[0], axes[1]  # data and variance axes
+        axd, axv = axes[2 * i], axes[2 * i + 1]  # data and variance axes
         data, variance = image.data.astype(np.float64), image.variance.astype(np.float64)
         data[~np.isfinite(data)] = np.nan
         variance[~np.isfinite(variance)] = np.nan
@@ -257,16 +253,16 @@ def plot_standalone_func(images: Image | list[Image], key: str) -> None:  # noqa
             "interpolation": "none",
         }
 
-    vmin, vmax = np.nanpercentile(data, [1, 99])
-    imd = axd.imshow(data.T, cmap=CMAP_DATA, aspect="equal", vmin=vmin, vmax=vmax, **im_kw)
-    add_colorbar("Data", fig, axd, imd)
-    vmin, vmax = np.nanpercentile(variance, [1, 99])
-    imv = axv.imshow(variance.T, cmap=CMAP_DATA, aspect="equal", vmin=vmin, vmax=vmax, **im_kw)
-    add_colorbar("Variance", fig, axv, imv)
+        vmin, vmax = np.nanpercentile(data, [1, 99])
+        imd = axd.imshow(data.T, cmap=CMAP_DATA, aspect="equal", vmin=vmin, vmax=vmax, **im_kw)
+        add_colorbar("Data", fig, axd, imd)
+        vmin, vmax = np.nanpercentile(variance, [1, 99])
+        imv = axv.imshow(variance.T, cmap=CMAP_DATA, aspect="equal", vmin=vmin, vmax=vmax, **im_kw)
+        add_colorbar("Variance", fig, axv, imv)
 
-    for ax in (axd, axv):
-        ax.set_xticks([])
-        ax.set_yticks([])
+        for ax in (axd, axv):
+            ax.set_xticks([])
+            ax.set_yticks([])
 
     output_location = (
         OUTPUT_PATH_MAP[flow_run_id] / f"standalone_{_STANDALONE_ORDERING[flow_run_id]}_{key}.webp"

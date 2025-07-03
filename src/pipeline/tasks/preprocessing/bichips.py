@@ -107,8 +107,8 @@ def standardise_b_images(images: list[Image], primary_headers: Headers) -> list[
         image.header["GAIN"] = GAINS["B"][i]
         image.header["CCDNAMP"] = 1
         image.header["SATURATE"] = image.header.get_int("CCD{i}SAT", 65535)
-        if "RUN_ID" not in image.header and "RUN_ID" in primary_headers:
-            image.header["RUN_ID"] = primary_headers.get_str("RUN_ID")
+        if "RUNID" not in image.header and "RUNID" in primary_headers:
+            image.header["RUNID"] = primary_headers.get_str("RUNID")
         if "OBSTYPE" not in image.header and "OBSTYPE" in primary_headers:
             image.header["OBSTYPE"] = primary_headers.get_str("OBSTYPE")
         if "CHANNEL" not in image.header and "CHANNEL" in primary_headers:
@@ -172,8 +172,8 @@ def standardise_r_images(images: list[Image], primary_headers: Headers) -> list[
         image.add_function_lineage(
             "Standardise R channel image, including 10 pixel trim on BIASSEC and flipping pixel direction"
         )
-        if "RUN_ID" not in image.header and "RUN_ID" in primary_headers:
-            image.header["RUN_ID"] = primary_headers.get_str("RUN_ID")
+        if "RUNID" not in image.header and "RUNID" in primary_headers:
+            image.header["RUNID"] = primary_headers.get_str("RUNID")
         if "OBSTYPE" not in image.header and "OBSTYPE" in primary_headers:
             image.header["OBSTYPE"] = primary_headers.get_str("OBSTYPE")
         if "CHANNEL" not in image.header and "CHANNEL" in primary_headers:

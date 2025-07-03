@@ -25,6 +25,7 @@ from pipeline.tasks.preprocessing import (
     ensure_float64,
     handle_saturation,
     handle_special_red_cosmetics,
+    remove_cosmic_rays,
     split_and_standardise,
     subtract_bias,
     subtract_dark,
@@ -150,6 +151,8 @@ def preprocess_exposure(config: PreprocessExposure) -> Path:
     elif primary.channel == "R":
         image = apply_custom_red_flat(image)
 
+    image = remove_cosmic_rays(image)
+
     # debug_comparison(image, primary.channel, primary.run_id, primary.type)
     shutil.copyfile(config.primary_file, config.raw_file_duplication_path)
     image.to_asdf(config.output_file)
@@ -163,8 +166,8 @@ if __name__ == "__main__":
     raw_dir = Path(__file__).parents[2] / "data/raw"
     files = [
         raw_dir / "runs/run_id=25_057_001/continuum_red.fits",
-        raw_dir / "runs/run_id=25_159_030/continuum_red.fits",
-        raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",
+        # raw_dir / "runs/run_id=25_159_030/continuum_red.fits",
+        # raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",
     ]
     for file in files:
         config = PreprocessExposure(primary_file=file)
