@@ -12,13 +12,16 @@ import numpy as np
 import prefect
 from matplotlib.image import AxesImage
 from matplotlib.ticker import MaxNLocator
+from prefect.artifacts import create_link_artifact
 
 from pipeline import settings
 from pipeline.common import Image, Section, get_logger, pipeline_task
 from pipeline.resolver.common import FileStoreEntry
+from pipeline.resolver.resolver import OUTPUT_PATH_MAP, get_run_id
 
 _IMAGE_STORE: dict[str, dict[str, list[Image]]] = defaultdict(OrderedDict)
 _BIAS_STORE: dict[str, dict[str, list[Image]]] = defaultdict(OrderedDict)
+_STANDALONE_ORDERING: dict[str, int] = defaultdict(lambda: -1)
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -56,6 +59,14 @@ def determine_figure_prefix(primary: FileStoreEntry) -> str:
     return f"{obstype=} - {run_id=} - {channel=}"
 
 
+def determine_figure_prefix_from_header(image: Image) -> str:
+    """Determine the figure title based on the primary file's metadata."""
+    run_id = image.header.get_optional_str("run_id", "unknown")
+    channel = image.header.get_optional_str("channel", "unknown")
+    obstype = image.header.get_optional_str("obstype", "unknown")
+    return f"{obstype=} - {run_id=} - {channel=}"
+
+
 def ensure_list[T](x: T | list[T] | tuple[T]) -> list[T]:
     """Ensure that the input is a list."""
     if isinstance(x, list):
@@ -77,13 +88,6 @@ def flatten_and_filter[T](inputs: Any, filter_type: type[T]) -> list[T]:
     elif isinstance(inputs, filter_type):
         return [inputs]
     return []
-
-
-def get_run_id() -> str:
-    try:
-        return prefect.context.FlowRunContext.get().flow_run.id
-    except Exception:
-        return "unknown"
 
 
 def plot():
@@ -111,6 +115,19 @@ def plot_bias():
                 _BIAS_STORE[flow_run_id]["initial"] = ensure_list(images)
             result = func(images, *args, **kwargs)  # type: ignore
             _BIAS_STORE[flow_run_id][func.__name__] = ensure_list(result)
+            return result
+
+        return inner  # type: ignore
+
+    return decorate
+
+
+def plot_standalone(name: str):
+    def decorate(func: Callable[P, R]) -> Callable[P, R]:
+        @wraps(func)
+        def inner(images: Image | list[Image], *args, **kwargs) -> Image | list[Image]:
+            result = func(images, *args, **kwargs)  # type: ignore
+            plot_standalone_func(result, name)
             return result
 
         return inner  # type: ignore
@@ -198,6 +215,70 @@ def get_vrange(data: np.ndarray) -> tuple[float, float]:
         vmin = min(vmin, -np.abs(vmax))
         vmax = max(vmax, np.abs(vmin))
     return float(vmin), float(vmax)
+
+
+def plot_standalone_func(images: Image | list[Image], key: str) -> None:  # noqa: C901
+    logger = get_logger()
+    if not settings.plot:
+        logger.info("Plotting is disabled. Skipping plot generation.")
+        return
+
+    if isinstance(images, Image):
+        images = [images]
+    if not images:
+        logger.warning("No images to plot.")
+        return
+
+    for i, image in enumerate(images):
+        title_prefix = determine_figure_prefix_from_header(image)
+
+        flow_run_id = get_run_id()
+        _STANDALONE_ORDERING[flow_run_id] += 1
+
+        title = f"{title_prefix} - {key}"
+        if len(images) > 1:
+            title += f" ({i + 1}/{len(images)})"
+        num_cols = 2
+        aspect_ratio = image.data.shape[1] / image.data.shape[0]
+
+        fig, axes = plt.subplots(
+            1,
+            num_cols,
+            figsize=(2 * 3 + 1.5, 3 * aspect_ratio + 1.5),
+            gridspec_kw={"hspace": 0.1, "wspace": 0.1},
+        )
+        axes[0].annotate(title, xy=(0, 1.01), xycoords="axes fraction", ha="left", va="bottom", fontsize=10)
+        axd, axv = axes[0], axes[1]  # data and variance axes
+        data, variance = image.data.astype(np.float64), image.variance.astype(np.float64)
+        data[~np.isfinite(data)] = np.nan
+        variance[~np.isfinite(variance)] = np.nan
+        im_kw = {
+            "origin": "lower",
+            "interpolation": "none",
+        }
+
+    vmin, vmax = np.nanpercentile(data, [1, 99])
+    imd = axd.imshow(data.T, cmap=CMAP_DATA, aspect="equal", vmin=vmin, vmax=vmax, **im_kw)
+    add_colorbar("Data", fig, axd, imd)
+    vmin, vmax = np.nanpercentile(variance, [1, 99])
+    imv = axv.imshow(variance.T, cmap=CMAP_DATA, aspect="equal", vmin=vmin, vmax=vmax, **im_kw)
+    add_colorbar("Variance", fig, axv, imv)
+
+    for ax in (axd, axv):
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    output_location = (
+        OUTPUT_PATH_MAP[flow_run_id] / f"standalone_{_STANDALONE_ORDERING[flow_run_id]}_{key}.webp"
+    ).resolve()
+    logger.info(f"Saving plot to {output_location}")
+    fig.savefig(output_location, dpi=600, bbox_inches="tight")
+    plt.close(fig)
+    create_link_artifact(
+        link=str(output_location),
+        description=f"Standalone plot for {key}",
+        key=key.replace("_", "-"),
+    )
 
 
 @pipeline_task()
@@ -394,10 +475,15 @@ def plot_detailed_images(primary: FileStoreEntry, output_path: Path, start: str 
             axxddl.set_xlabel("ΔData columns", fontsize=8)
             axyvdl.set_xlabel("ΔVariance rows", fontsize=8)
             axxvdl.set_xlabel("ΔVariance columns", fontsize=8)
-        output_location = output_path / f"preprocessing_detailed_{i}_{key}.webp"
+        output_location = (output_path / f"preprocessing_detailed_{i}_{key}.webp").resolve()
         logger.info(f"Saving plot to {output_location}")
         fig.savefig(output_location, dpi=600, bbox_inches="tight")
         plt.close(fig)
+        create_link_artifact(
+            link=str(output_location),
+            description=title,
+            key="detailed-" + key.replace("_", "-"),
+        )
 
         prior_images = images
 
@@ -474,6 +560,11 @@ def plot_bias_sections(primary_file: FileStoreEntry, output_folder: Path) -> Non
 
         prior_images = images
 
-        output_location = output_folder / f"bias_{i}_{key}.png"
+        output_location = (output_folder / f"bias_{i}_{key}.png").resolve()
         logger.info(f"Saving bias section plot to {output_location}")
-        fig.savefig(output_location, dpi=900, bbox_inches="tight")
+        fig.savefig(output_location, dpi=600, bbox_inches="tight")
+        create_link_artifact(
+            link=str(output_location),
+            description=title,
+            key="bias-" + key.replace("_", "-"),
+        )

@@ -71,7 +71,7 @@ class Headers(dict[str, str | bool | int | float | list[str] | list[int] | list[
             return default
         raise ValueError(f"Key {key} is not a str: {value} has type {type(value)}")
 
-    def get_str(self, key: str, default: str = None) -> str:  # type: ignore
+    def get_str(self, key: str) -> str:  # type: ignore
         value = self.get_optional_str(key)
         assert value is not None, f"Key {key} is not not available in the header"
         return value

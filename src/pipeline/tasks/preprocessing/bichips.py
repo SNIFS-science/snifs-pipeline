@@ -2,6 +2,7 @@ import numpy as np
 
 from pipeline.common import Headers, Image, listify, pipeline_task
 from pipeline.tasks.plotting import plot
+from pipeline.tasks.plotting.plots import plot_standalone
 
 GAINS = {
     "B": [0.773, 0.744],
@@ -12,6 +13,7 @@ GAINS = {
 
 @plot()
 @pipeline_task()
+@plot_standalone("assemble_bichip_to_image")
 def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> Image:
     """Ensures we have a 2048x4096 exposure image from the raw file.
 
@@ -97,7 +99,7 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> I
     return final_image
 
 
-def standardise_b_images(images: list[Image]) -> list[Image]:
+def standardise_b_images(images: list[Image], primary_headers: Headers) -> list[Image]:
     # If this is a detcom file and thus has two extensions to start with, great!
     # All we need to do then is standardise some header values and return the images.
     for i, image in enumerate(images):
@@ -105,6 +107,13 @@ def standardise_b_images(images: list[Image]) -> list[Image]:
         image.header["GAIN"] = GAINS["B"][i]
         image.header["CCDNAMP"] = 1
         image.header["SATURATE"] = image.header.get_int("CCD{i}SAT", 65535)
+        if "RUN_ID" not in image.header and "RUN_ID" in primary_headers:
+            image.header["RUN_ID"] = primary_headers.get_str("RUN_ID")
+        if "OBSTYPE" not in image.header and "OBSTYPE" in primary_headers:
+            image.header["OBSTYPE"] = primary_headers.get_str("OBSTYPE")
+        if "CHANNEL" not in image.header and "CHANNEL" in primary_headers:
+            image.header["CHANNEL"] = primary_headers.get_str("CHANNEL")
+
         # As per algocams.cxx:125, detcom images drop the first 11 columns of overscan!
         # The fact this is twelve below is because this is 1-indexed
         # EDIT: Actually, going off the comment both detcom and otcom want 10 columns dropped?
@@ -116,7 +125,7 @@ def standardise_b_images(images: list[Image]) -> list[Image]:
     return images
 
 
-def standardise_r_images(images: list[Image]) -> list[Image]:
+def standardise_r_images(images: list[Image], primary_headers: Headers) -> list[Image]:
     image = images[0]
     new_images: list[Image] = []
     num_amps = image.header.get_int("CCDNAMP", 2)
@@ -163,6 +172,12 @@ def standardise_r_images(images: list[Image]) -> list[Image]:
         image.add_function_lineage(
             "Standardise R channel image, including 10 pixel trim on BIASSEC and flipping pixel direction"
         )
+        if "RUN_ID" not in image.header and "RUN_ID" in primary_headers:
+            image.header["RUN_ID"] = primary_headers.get_str("RUN_ID")
+        if "OBSTYPE" not in image.header and "OBSTYPE" in primary_headers:
+            image.header["OBSTYPE"] = primary_headers.get_str("OBSTYPE")
+        if "CHANNEL" not in image.header and "CHANNEL" in primary_headers:
+            image.header["CHANNEL"] = primary_headers.get_str("CHANNEL")
         new_images.append(image)
 
     return new_images
@@ -170,15 +185,15 @@ def standardise_r_images(images: list[Image]) -> list[Image]:
 
 @plot()
 @pipeline_task()
-def split_and_standardise(images: list[Image], channel: str) -> list[Image]:
+def split_and_standardise(images: list[Image], channel: str, primary_headers: Headers) -> list[Image]:
     """Detcom (blue) comes in 2 extensions, one for each amplifier.
     Otcom (red) has them together. We want them split. Additionally, various
     parts of the headers for the upstream files are incorrect, and we need to override them here
     """
     if channel == "B":
-        return standardise_b_images(images)
+        return standardise_b_images(images, primary_headers)
     elif channel == "R":
-        return standardise_r_images(images)
+        return standardise_r_images(images, primary_headers)
     raise ValueError(f"Unknown channel {channel}. Expected 'B' or 'R'.")
 
 

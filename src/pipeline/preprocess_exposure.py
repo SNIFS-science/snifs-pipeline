@@ -9,7 +9,7 @@ from pipeline.common.image import Image
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.resolver.common import FileType, PipelineStage
-from pipeline.tasks.build_filestore import FlowConfig
+from pipeline.resolver.resolver import FlowConfig
 from pipeline.tasks.loaders import clear_output_path, load_headers, load_images_from_file
 from pipeline.tasks.plotting import plot, plot_bias_sections, plot_detailed_images
 from pipeline.tasks.preprocessing import (
@@ -47,7 +47,7 @@ class PreprocessExposure(FlowConfig):
 
     @cached_property
     def output_folder(self) -> Path:
-        primary = config.fetch_metadata(config.primary_file)
+        primary = self.fetch_metadata(self.primary_file)
 
         return (
             self.resolver.output_path
@@ -92,10 +92,11 @@ def debug_comparison(image: Image, channel: str, run_id: str | None, obstype: st
 def preprocess_exposure(config: PreprocessExposure) -> Path:
     logger = get_logger()
     primary = config.fetch_metadata(config.primary_file)
-    logger.info(f"Starting preprocessing with settings:\n{config.model_dump_json(indent=2)}\n")
+    config.initialise_and_log()
     logger.info(f"Primary file:\n{primary.model_dump_json(indent=2)}\n")
     assert primary.channel is not None, "Primary file must have a channel defined in the headers."
 
+    clear_output_path(config.output_folder)
     images = load_images_from_file(config.primary_file, transpose=True)
     primary_headers = load_headers(config.primary_file)
 
@@ -105,7 +106,7 @@ def preprocess_exposure(config: PreprocessExposure) -> Path:
     if "TIMEON" not in primary_headers:
         primary_headers["TIMEON"] = determine_timeon(config.ccd_on_time_file, primary_headers)
 
-    images = split_and_standardise(images, primary.channel)
+    images = split_and_standardise(images, primary.channel, primary_headers)
     images = handle_saturation(images)
 
     if len(images) == 2:  # Binary offset model is only derived for 2 chip models.
@@ -150,7 +151,6 @@ def preprocess_exposure(config: PreprocessExposure) -> Path:
         image = apply_custom_red_flat(image)
 
     # debug_comparison(image, primary.channel, primary.run_id, primary.type)
-    clear_output_path(config.output_folder)
     shutil.copyfile(config.primary_file, config.raw_file_duplication_path)
     image.to_asdf(config.output_file)
     plot_bias_sections(primary, config.output_folder)

@@ -31,7 +31,6 @@ def load_images_from_file(science_file: Path, transpose: bool = False) -> list[I
     return data
 
 
-@pipeline_task()
 def load_headers(science_file: Path, hdu_index: int = 0) -> Headers:
     """
     Load the primary header of a FITS file.

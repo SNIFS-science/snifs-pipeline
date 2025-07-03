@@ -1,5 +1,5 @@
 from pipeline.common import Image, Section, pipeline_task
-from pipeline.tasks.plotting.plots import plot
+from pipeline.tasks.plotting.plots import plot, plot_standalone
 
 RED_HFFF_LINES = [
     {
@@ -33,6 +33,7 @@ RED_HFFFF_SIGMA = 0.004
 
 @plot()
 @pipeline_task()
+@plot_standalone("handle_special_red_cosmetics")
 def apply_custom_red_flat(image: Image) -> Image:
     # Here we are referencing the CustomFlat function in preprocessor.cxx:1042
     # It's interesting that this function is applied at the end, because there's

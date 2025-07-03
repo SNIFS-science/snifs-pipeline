@@ -2,11 +2,13 @@ import numpy as np
 
 from pipeline.common import Image, flag_skip, pipeline_task
 from pipeline.tasks.plotting import plot
+from pipeline.tasks.plotting.plots import plot_standalone
 
 
 @flag_skip("POISNOIS")
 @plot()
 @pipeline_task()
+@plot_standalone("add_poisson_noise_to_variance")
 def add_poisson_noise_to_variance(image: Image) -> Image:
     image = image.copy()
     # Poisson noise variance is equal to number of electron samples.

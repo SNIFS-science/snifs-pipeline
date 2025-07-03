@@ -2,11 +2,14 @@ from functools import cached_property
 from pathlib import Path
 
 import polars as pl
+import prefect
 from pydantic import BaseModel, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from pipeline.common.log import get_logger
 from pipeline.config.global_settings import settings
-from pipeline.resolver import file_match_registry
 from pipeline.resolver.common import FileStoreDataFrame, FileStoreEntry, FileType, extract_file_details
+from pipeline.resolver.registry import file_match_registry
 
 
 class Resolver(BaseModel):
@@ -136,3 +139,39 @@ class Resolver(BaseModel):
         Get all match paths for a file type.
         """
         return [self.data_path / match.file_path for match in self.get_matches(file_type, primary)]
+
+
+def get_run_id() -> str:
+    try:
+        return prefect.context.FlowRunContext.get().flow_run.id
+    except Exception:
+        return "unknown"
+
+
+class FlowConfig(BaseSettings):
+    model_config = SettingsConfigDict(cli_parse_args=True)
+
+    @cached_property
+    def resolver(self) -> Resolver:
+        from pipeline.tasks.build_filestore import build_filestore
+
+        return build_filestore(refresh=getattr(self, "refresh_filestore", False))
+
+    def fetch_metadata(self, path: Path) -> FileStoreEntry:
+        return self.resolver.get_file_metadata(path)
+
+    @cached_property
+    def output_folder(self) -> Path:
+        raise NotImplementedError("This method should be overridden in subclasses to provide the output folder path.")
+
+    def propagate_output_path(self) -> None:
+        OUTPUT_PATH_MAP[get_run_id()] = self.output_folder
+
+    def initialise_and_log(self) -> None:
+        self.resolver  # noqa: B018
+        self.propagate_output_path()
+        get_logger().info(f"Config initialised:\n{self.model_dump_json(indent=2)}\n")
+
+
+# A map from flow_id to the output path for explicit access
+OUTPUT_PATH_MAP: dict[str, Path] = {}

@@ -1,7 +1,7 @@
 import numpy as np
 
 from pipeline.common import Image, Section, get_logger, pipeline_task
-from pipeline.tasks.plotting.plots import plot
+from pipeline.tasks.plotting.plots import plot, plot_standalone
 
 # Reminder that sections are not end-inclusive
 BAD_PIXELS = {
@@ -32,6 +32,7 @@ SPECIAL_ERROR_FAST = 0.18
 
 @plot()
 @pipeline_task()
+@plot_standalone("handle_special_red_cosmetics")
 def handle_special_red_cosmetics(image: Image) -> Image:  # noqa: C901
     """Please don't ever ask me why anything in this function is the way it is."""
     logger = get_logger()
@@ -158,6 +159,7 @@ def handle_special_red_cosmetics(image: Image) -> Image:  # noqa: C901
 
 @plot()
 @pipeline_task()
+@plot_standalone("handle_special_red_cosmetics")
 def cheat_cosmetics(image: Image, channel: str) -> Image:
     image = image.copy()
     # Turns out the bad sections are relative to the ccd section

@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from pipeline.common import Image, Section, flag_skip, get_logger, pipeline_task
 from pipeline.tasks.plotting import plot
+from pipeline.tasks.plotting.plots import plot_standalone
 
 BOLTZMANN_CONSTANT = 8.617333262145e-5  # eV/K
 ABS_ZERO = 273.15  # Celsius to Kelvin conversion factor
@@ -54,6 +55,7 @@ class DarkModel(BaseModel):
 @flag_skip("BIASDONE")
 @plot()
 @pipeline_task()
+@plot_standalone("subtract_bias")
 def subtract_bias(image: Image, reference: Image | DarkModel) -> Image:
     if isinstance(reference, DarkModel):
         return subtract_bias_model(image, reference)
@@ -90,6 +92,7 @@ def subtract_bias_image(image: Image, bias_image: Image) -> Image:
 @flag_skip("DARKDONE")
 @plot()
 @pipeline_task()
+@plot_standalone("subtract_dark")
 def subtract_dark(image: Image, model: DarkModel, dark_images: list[Image] | None) -> Image:
     if dark_images is None:
         return subtract_dark_model(image, model)

@@ -4,11 +4,13 @@ from scipy.stats import linregress
 
 from pipeline.common import Image, flag_skip, listify, pipeline_task
 from pipeline.tasks.plotting import plot, plot_bias
+from pipeline.tasks.plotting.plots import plot_standalone
 
 
 @plot_bias()
 @plot()
 @pipeline_task()
+@plot_standalone("correct_even_odd")
 @listify
 @flag_skip("OEPARAM")
 def correct_even_odd(image: Image) -> Image:
@@ -71,6 +73,7 @@ def add_overscan_variance(image: Image) -> Image:
 @plot_bias()
 @plot()
 @pipeline_task()
+@plot_standalone("subtract_offset")
 @listify
 @flag_skip("OVSCDONE")
 def subtract_offset(image: Image) -> Image:
