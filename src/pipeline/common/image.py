@@ -202,7 +202,7 @@ class Image(BaseModel):
         )
         hdul.writeto(fits_file, overwrite=True)
 
-    def to_asdf(self, asdf_file: Path | str) -> None:
+    def to_asdf(self, asdf_file: Path | str, coerce_to_float32: bool = True) -> None:
         if isinstance(asdf_file, str):
             asdf_file = Path(asdf_file)
         parent = asdf_file.parent
@@ -214,13 +214,13 @@ class Image(BaseModel):
         af = asdf.AsdfFile(
             {
                 "header": self.header.to_dict(),
-                "data": self.data,
-                "variance": self.variance,
+                "data": self.data.astype(np.float32) if coerce_to_float32 else self.data,
+                "variance": self.variance.astype(np.float32) if coerce_to_float32 else self.variance,
                 "lineage": [lineage.model_dump() for lineage in self.lineage],
             }
         )
 
-        af.write_to(asdf_file, all_array_compression="zlib")
+        af.write_to(asdf_file, all_array_compression="zlib", compression_kwargs={"level": 9})
 
     @classmethod
     def from_asdf(cls, asdf_file: Path | str) -> "Image":
