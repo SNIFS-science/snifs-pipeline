@@ -120,6 +120,8 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
         image = apply_custom_red_flat(image)
     image = remove_cosmic_rays(image)
 
+    # TODO: need add_parangle.py from Daniel, along with the parangel.txt file to get the information from
+
     # debug_comparison(image, primary.channel, primary.run_id, primary.type)
     shutil.copyfile(conf.primary_file, conf.raw_file_duplication_path)
     image.to_asdf(conf.output_file)
