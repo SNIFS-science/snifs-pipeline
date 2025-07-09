@@ -1,17 +1,15 @@
-import re
 import shutil
 from functools import cached_property
 from pathlib import Path
 
 from pydantic import Field, FilePath, computed_field
 
-from pipeline.common.image import Image
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig
 from pipeline.tasks.loaders import clear_output_path, load_headers, load_images_from_file
-from pipeline.tasks.plotting import plot, plot_bias_sections, plot_detailed_images
+from pipeline.tasks.plotting import plot_bias_sections, plot_detailed_images
 from pipeline.tasks.preprocessing import (
     add_overscan_variance,
     apply_custom_red_flat,
@@ -33,13 +31,13 @@ from pipeline.tasks.preprocessing.models import subtract_bias_and_add_poisson
 
 class PreprocessExposureConfig(FlowConfig):
     primary_file: FilePath = Field(description="Location of the continuum exposure file. Relative to the data path.")
-    bias_image_file: FileType.BIAS.Path = Field(default=None)  # type: ignore
-    bias_model_file: FileType.BIAS_MODEL.Path = Field(default=None)  # type: ignore
-    dark_image_file: FileType.DARK.Path = Field(default=None)  # type: ignore
-    dark_model_file: FileType.DARK_MODEL.Path = Field(default=None)  # type: ignore
-    flat_image_file: FileType.CONTINUUM.OptionalPath = Field(default=None)
-    ccd_on_time_file: FileType.CCD_ON_TIMES.Path = Field(default=None)  # type: ignore
-    binary_offset_model_file: FileType.BINARY_OFFSET_MODEL.Path = Field(default=None)  # type: ignore
+    bias_image_file: FileType.BIAS.Path | None = Field(default=None)
+    bias_model_file: FileType.BIAS_MODEL.Path | None = Field(default=None)
+    dark_image_file: FileType.DARK.Path | None = Field(default=None)
+    dark_model_file: FileType.DARK_MODEL.Path | None = Field(default=None)
+    flat_image_file: FileType.CONTINUUM.OptionalPath | None = Field(default=None)
+    ccd_on_time_file: FileType.CCD_ON_TIMES.Path | None = Field(default=None)
+    binary_offset_model_file: FileType.BINARY_OFFSET_MODEL.Path | None = Field(default=None)
     prefer_bias_image: bool = Field(default=True)
     use_dark_stack_if_possible: bool = Field(default=True)
     refresh_filestore: bool = Field(default=True)
@@ -64,27 +62,25 @@ class PreprocessExposureConfig(FlowConfig):
         return self.output_folder / f"{PipelineStage.PREPROCESSED.value}.asdf"
 
 
-@plot()
-def debug_comparison(image: Image, channel: str, run_id: str | None, obstype: str) -> Image:
-    import numpy as np
-
-    assert run_id is not None, "Run ID must be provided for debugging comparison."
-
-    # 005 and 006 are R and B continuum
-    # 011 are the arcs
-    data_dump_dir = Path(__file__).parents[2] / ".data_dump"
-    expected_pattern = f"P{run_id}_*_{channel}.fits"
-    found_files = list(data_dump_dir.glob(expected_pattern))
-    if len(found_files) > 1:
-        extra_match = f".*_011_0._{channel}.fits" if obstype == "ARC" else f".*_00[56]_0._{channel}.fits"
-        found_files = [f for f in found_files if re.match(extra_match, f.name)]
-    assert len(found_files) == 1, (
-        f"Expected exactly one file matching {expected_pattern}, found {len(found_files)}: {found_files}."
-    )
-    get_logger().info(f"Debugging comparison with file: {found_files[0]}")
-    dan = Image.from_fits_file(found_files[0], transpose=True)
-    dan.variance[dan.variance > 1e6] = np.inf
-    return dan
+# @plot()
+# def debug_comparison(image: Image, channel: str, run_id: str | None, obstype: str) -> Image:
+#     import numpy as np
+#     assert run_id is not None, "Run ID must be provided for debugging comparison."
+#     # 005 and 006 are R and B continuum
+#     # 011 are the arcs
+#     data_dump_dir = Path(__file__).parents[2] / ".data_dump"
+#     expected_pattern = f"P{run_id}_*_{channel}.fits"
+#     found_files = list(data_dump_dir.glob(expected_pattern))
+#     if len(found_files) > 1:
+#         extra_match = f".*_011_0._{channel}.fits" if obstype == "ARC" else f".*_00[56]_0._{channel}.fits"
+#         found_files = [f for f in found_files if re.match(extra_match, f.name)]
+#     assert len(found_files) == 1, (
+#         f"Expected exactly one file matching {expected_pattern}, found {len(found_files)}: {found_files}."
+#     )
+#     get_logger().info(f"Debugging comparison with file: {found_files[0]}")
+#     dan = Image.from_fits_file(found_files[0], transpose=True)
+#     dan.variance[dan.variance > 1e6] = np.inf
+#     return dan
 
 
 @pipeline_flow()
@@ -93,7 +89,11 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
     primary = conf.fetch_metadata(conf.primary_file)
     conf.initialise_and_log()
     logger.info(f"Primary file:\n{primary.model_dump_json(indent=2)}\n")
+
     assert primary.channel is not None, "Primary file must have a channel defined in the headers."
+    assert conf.ccd_on_time_file is not None, "CCD on time file must be provided."
+    assert conf.binary_offset_model_file is not None, "Binary offset model file must be provided."
+    assert conf.dark_model_file is not None, "Dark model file must be provided."
 
     clear_output_path(conf.output_folder)
     images = load_images_from_file(conf.primary_file, transpose=True)
