@@ -84,7 +84,7 @@ class PreprocessExposureConfig(FlowConfig):
 #     return dan
 
 
-@registry.register(DeploymentConfig(project="snifs", max_walltime=20 * 60))
+@registry.register(DeploymentConfig(max_walltime=20 * 60))
 @pipeline_flow()
 def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
     logger = get_logger()

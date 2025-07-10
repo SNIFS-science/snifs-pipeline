@@ -22,7 +22,7 @@ class DeploymentConfig(BaseModel):
         "Refer to https://docs.nersc.gov/jobs/policy/#qos-cost-factor-charge-multipliers-and-discounts for details.",
     )
     project: str = Field(
-        default="default",
+        default="snfactry",
         description="Project name to use for the job for billing.",
     )
     nodes: int = Field(
@@ -48,7 +48,7 @@ class DeploymentConfig(BaseModel):
 
     def get_job_variables(self) -> dict[str, Any]:
         return {
-            "volumes": [f"{settings.data_path}:/data:rw"],
+            "volumes": [f"{settings.data_path}:/data:rw", f"{settings.output_path}:/output:rw"],
         }  # TODO: Blanking this out while we play with the docker worker
         return {
             "qos": self.qos,
