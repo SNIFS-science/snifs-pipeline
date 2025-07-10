@@ -3,6 +3,8 @@ from typing import ParamSpec, TypeVar
 from prefect import Flow
 from pydantic import BaseModel, Field
 
+from pipeline.config.global_settings import settings
+
 
 class DeploymentConfig(BaseModel):
     work_pool_name: str = Field(
@@ -45,7 +47,9 @@ class DeploymentConfig(BaseModel):
     )
 
     def get_job_variables(self) -> dict[str, str]:
-        return {}  # TODO: Blanking this out while we play with the docker worker
+        return {
+            "volumes": f"{settings.data_path}:/data:rw",
+        }  # TODO: Blanking this out while we play with the docker worker
         return {
             "qos": self.qos,
             "project": self.project,
