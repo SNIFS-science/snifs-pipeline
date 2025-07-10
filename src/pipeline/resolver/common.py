@@ -12,6 +12,8 @@ from pandera.polars import DataFrameModel, Field
 from pandera.typing.polars import DataFrame, Series
 from pydantic import BaseModel, BeforeValidator, FilePath, ValidationInfo
 
+from pipeline.common.log import get_logger
+
 UTCDatetime = Annotated[DateTime, False, "UTC", "ms"]
 DATETIME_CONVERSION_EXPR = cs.datetime().dt.cast_time_unit("ms").dt.convert_time_zone("UTC")
 
@@ -40,6 +42,8 @@ def resolve_type(
 ) -> Path | None:
     from pipeline.tasks.build_filestore import build_filestore
 
+    logger = get_logger()
+    logger.info(f"Resolving file type {file_type} for value {value} with must_match={must_match}")
     resolver = build_filestore(refresh=info.data.get("refresh_filestore", False))
     if isinstance(value, Path):
         return value
