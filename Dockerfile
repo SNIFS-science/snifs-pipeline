@@ -1,4 +1,5 @@
 FROM python:3.13-slim AS builder
+ARG GIT_COMMIT_HASH
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && apt-get install -y git curl gcc libpq-dev
@@ -12,7 +13,9 @@ ENV UV_PROJECT_ENVIRONMENT=/usr/local/ \
     UV_FROZEN=1
 
 
-WORKDIR /workspace
+WORKDIR /src
+ENV GIT_REPO="https://github.com/SNIFS-science/snifs-pipeline"
+ENV GIT_COMMIT_HASH=$GIT_COMMIT_HASH
 
 # Install third party dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -20,4 +23,4 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
       uv sync --all-extras --frozen --no-dev
 
-COPY src /workspace
+COPY src /src

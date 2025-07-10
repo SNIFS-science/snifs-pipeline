@@ -6,6 +6,7 @@ from pydantic import Field, FilePath, computed_field
 
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
+from pipeline.config.deployment import DeploymentConfig, registry
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig
 from pipeline.tasks.loaders import clear_output_path, load_headers, load_images_from_file
@@ -83,6 +84,7 @@ class PreprocessExposureConfig(FlowConfig):
 #     return dan
 
 
+@registry.register(DeploymentConfig(project="snifs", max_walltime=20 * 60))
 @pipeline_flow()
 def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
     logger = get_logger()

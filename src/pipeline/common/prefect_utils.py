@@ -67,7 +67,7 @@ def pipeline_task(**kwargs):
 
 
 def pipeline_flow(**kwargs):
-    def decorate(func: Callable) -> Callable:
+    def decorate(func: Callable[P, R]) -> Flow[P, R]:
         final_kwargs = {**FLOW_DEFAULT_KWARGS, **kwargs}
         return flow(**final_kwargs)(func)
 
