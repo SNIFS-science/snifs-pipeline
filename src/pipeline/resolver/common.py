@@ -79,7 +79,7 @@ class FileType(StrEnum):
 
     @property
     def Path(self) -> type[FilePath | None]:
-        return Annotated[FilePath, BeforeValidator(partial(resolve_type, file_type=self))]  # type: ignore
+        return Annotated[FilePath | None, BeforeValidator(partial(resolve_type, file_type=self))]  # type: ignore
 
     @property
     def OptionalPath(self) -> type[FilePath | None]:
