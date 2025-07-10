@@ -22,7 +22,7 @@ def build_filestore(refresh: bool = False) -> Resolver:
     # If files are deleted, we want to reflect this as well.
     detected_filepaths = []
     all_files = list(resolver.data_path.rglob("*/**/*"))
-    logger.info(f"Found {len(all_files)} files in the data path. Rebuilding the filestore.")
+    logger.info(f"Found {len(all_files)} files in the data path {resolver.data_path}. Rebuilding the filestore.")
     for file in all_files:
         if file.is_dir():
             continue

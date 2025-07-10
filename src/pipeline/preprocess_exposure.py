@@ -2,7 +2,7 @@ import shutil
 from functools import cached_property
 from pathlib import Path
 
-from pydantic import Field, FilePath, computed_field
+from pydantic import Field, computed_field
 
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
@@ -31,7 +31,7 @@ from pipeline.tasks.preprocessing.models import subtract_bias_and_add_poisson
 
 
 class PreprocessExposureConfig(FlowConfig):
-    primary_file: FilePath = Field(description="Location of the continuum exposure file. Relative to the data path.")
+    primary_file: Path = Field(description="Location of the continuum exposure file. Relative to the data path.")
     bias_image_file: FileType.BIAS.Path | None = Field(default=None)
     bias_model_file: FileType.BIAS_MODEL.Path | None = Field(default=None)
     dark_image_file: FileType.DARK.Path | None = Field(default=None)
