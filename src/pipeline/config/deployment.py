@@ -1,4 +1,4 @@
-from typing import ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 from prefect import Flow
 from pydantic import BaseModel, Field
@@ -46,9 +46,9 @@ class DeploymentConfig(BaseModel):
         description="Docker image to use.",
     )
 
-    def get_job_variables(self) -> dict[str, str]:
+    def get_job_variables(self) -> dict[str, Any]:
         return {
-            "volumes": f"{settings.data_path}:/data:rw",
+            "volumes": [f"{settings.data_path}:/data"],
         }  # TODO: Blanking this out while we play with the docker worker
         return {
             "qos": self.qos,

@@ -21,6 +21,7 @@ def build_filestore(refresh: bool = False) -> Resolver:
 
     # If files are deleted, we want to reflect this as well.
     detected_filepaths = []
+    logger.info(f"Starting to build the filestore at {resolver.file_store_path}")
     all_files = list(resolver.data_path.rglob("*/**/*"))
     logger.info(f"Found {len(all_files)} files in the data path {resolver.data_path}. Rebuilding the filestore.")
     for file in all_files:
