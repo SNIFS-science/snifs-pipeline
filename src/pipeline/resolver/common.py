@@ -78,7 +78,7 @@ class FileType(StrEnum):
     BIAS = "BIAS"
 
     @property
-    def Path(self) -> type[FilePath]:
+    def Path(self) -> type[FilePath | None]:
         return Annotated[FilePath, BeforeValidator(partial(resolve_type, file_type=self))]  # type: ignore
 
     @property
