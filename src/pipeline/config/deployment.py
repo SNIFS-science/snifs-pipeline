@@ -48,7 +48,7 @@ class DeploymentConfig(BaseModel):
 
     def get_job_variables(self) -> dict[str, Any]:
         return {
-            "volumes": [f"{settings.data_path}:/data"],
+            "volumes": [f"{settings.data_path}:/data:rw"],
         }  # TODO: Blanking this out while we play with the docker worker
         return {
             "qos": self.qos,
