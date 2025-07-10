@@ -13,14 +13,16 @@ def get_deployments() -> dict[str, list[RunnerDeployment]]:
     """Return a map of image names to deployments."""
     deployments = defaultdict(list)
     for flow, deployment in registry.deployments:
-        deployments[deployment.image].append(
-            flow.to_deployment(
-                name=flow.name,
-                work_pool_name=deployment.work_pool_name,
-                work_queue_name=deployment.work_queue,
-                job_variables=deployment.get_job_variables(),
-            )
+        runner_deployment = flow.to_deployment(
+            name=flow.name,
+            work_pool_name=deployment.work_pool_name,
+            work_queue_name=deployment.work_queue,
+            job_variables=deployment.get_job_variables(),
         )
+        # Prefect keeps the src location, but when we build our image we put it
+        # at /, so src/... becomes /src/...
+        runner_deployment.entrypoint = "/" + runner_deployment.entrypoint  # type: ignore
+        deployments[deployment.image].append(runner_deployment)
     return deployments
 
 
