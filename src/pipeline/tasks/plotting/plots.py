@@ -285,7 +285,7 @@ def plot_standalone_func(images: Image | list[Image], key: str) -> None:  # noqa
     plt.close(fig)
     output_location.chmod(0o644)  # Make the file readable by everyone
     create_link_artifact(
-        link=str(output_location),
+        link=convert_path_to_url(output_location),
         description=f"Standalone plot for {key}",
         key=key.replace("_", "-"),
     )
@@ -491,7 +491,7 @@ def plot_detailed_images(primary: FileStoreEntry, output_path: Path, start: str 
         plt.close(fig)
         output_location.chmod(0o644)  # Make the file readable by everyone
         create_link_artifact(
-            link=str(output_location),
+            link=convert_path_to_url(output_location),
             description=title,
             key="detailed-" + key.replace("_", "-"),
         )
