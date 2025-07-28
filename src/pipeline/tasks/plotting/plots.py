@@ -52,13 +52,16 @@ CMAP_ZOOM = cmr.rainforest
 CMAP_DIFF = cmr.prinsenvlag
 
 
-def convert_path_to_url(path: str) -> str:
+def convert_path_to_url(path_str: str | Path) -> str:
     REPLACES = {
         r"^/global/cfs/cdirs/(.*)/www": r"https://portal.nersc.gov/cfs/\1",  # NERSC portal URL
     }
+    if isinstance(path_str, Path):
+        path_str = str(path_str)
+
     for pattern, replacement in REPLACES.items():
-        path = re.sub(pattern, replacement, path)
-    return path
+        path_str = re.sub(pattern, replacement, path_str)
+    return path_str
 
 
 def determine_figure_prefix(primary: FileStoreEntry) -> str:
@@ -573,7 +576,7 @@ def plot_bias_sections(primary_file: FileStoreEntry, output_folder: Path) -> Non
         fig.savefig(output_location, dpi=600, bbox_inches="tight")
         output_location.chmod(0o644)  # Make the file readable by everyone
         create_link_artifact(
-            link=str(output_location),
+            link=convert_path_to_url(output_location),
             description=title,
             key="bias-" + key.replace("_", "-"),
         )
