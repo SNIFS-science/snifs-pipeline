@@ -32,7 +32,7 @@ class DeploymentConfig(BaseModel):
         description="Number of processes to allocate per node.",
     )
     memory: int = Field(
-        default=4096,
+        default=8192,
         description="Memory in MB to allocate.",
     )
     max_walltime: int = Field(
