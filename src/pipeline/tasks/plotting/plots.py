@@ -280,6 +280,7 @@ def plot_standalone_func(images: Image | list[Image], key: str) -> None:  # noqa
     output_location = (
         PUBLIC_PATH_MAP[flow_run_id] / f"standalone_{_STANDALONE_ORDERING[flow_run_id]}_{key}.webp"
     ).resolve()
+    output_location.parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving plot to {output_location}")
     fig.savefig(output_location, dpi=600, bbox_inches="tight")
     plt.close(fig)
@@ -486,6 +487,7 @@ def plot_detailed_images(primary: FileStoreEntry, output_path: Path, start: str 
             axyvdl.set_xlabel("ΔVariance rows", fontsize=8)
             axxvdl.set_xlabel("ΔVariance columns", fontsize=8)
         output_location = (output_path / f"preprocessing_detailed_{i}_{key}.webp").resolve()
+        output_location.parent.mkdir(parents=True, exist_ok=True)
         logger.info(f"Saving plot to {output_location}")
         fig.savefig(output_location, dpi=600, bbox_inches="tight")
         plt.close(fig)
@@ -572,6 +574,7 @@ def plot_bias_sections(primary_file: FileStoreEntry, output_folder: Path) -> Non
         prior_images = images
 
         output_location = (output_folder / f"bias_{i}_{key}.png").resolve()
+        output_location.parent.mkdir(parents=True, exist_ok=True)
         logger.info(f"Saving bias section plot to {output_location}")
         fig.savefig(output_location, dpi=600, bbox_inches="tight")
         output_location.chmod(0o644)  # Make the file readable by everyone
