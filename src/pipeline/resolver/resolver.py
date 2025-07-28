@@ -44,7 +44,12 @@ class Resolver(BaseModel):
 
     @classmethod
     def create(cls, **kwargs) -> "Resolver":
-        kwargs = {"data_path": settings.data_path, "output_path": settings.output_path}
+        kwargs = {
+            "data_path": settings.data_path,
+            "output_path": settings.output_path,
+            "public_path": settings.public_path,
+            **kwargs,
+        }
         kwargs.update(kwargs)
         if "file_store_path" not in kwargs:
             kwargs["file_store_path"] = kwargs["data_path"] / "filestore.parquet"
