@@ -114,8 +114,8 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
     # debug_comparison(image, primary.channel, primary.run_id, primary.type)
     shutil.copyfile(conf.primary_file, conf.raw_file_duplication_path)
     image.to_asdf(conf.output_file)
-    plot_bias_sections(primary, conf.output_folder)
-    plot_detailed_images(primary, conf.output_folder)
+    plot_bias_sections(primary, conf.public_folder)
+    plot_detailed_images(primary, conf.public_folder)
 
     return conf.output_file
 

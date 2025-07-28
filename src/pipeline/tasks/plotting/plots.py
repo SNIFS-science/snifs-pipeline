@@ -1,4 +1,5 @@
 import contextlib
+import re
 from collections import defaultdict
 from collections.abc import Callable
 from functools import wraps
@@ -17,7 +18,7 @@ from prefect.artifacts import create_link_artifact
 from pipeline import settings
 from pipeline.common import Image, Section, get_logger, pipeline_task
 from pipeline.resolver.common import FileStoreEntry
-from pipeline.resolver.resolver import OUTPUT_PATH_MAP, get_run_id
+from pipeline.resolver.resolver import PUBLIC_PATH_MAP, get_run_id
 
 _IMAGE_STORE: dict[str, dict[str, list[Image]]] = defaultdict(OrderedDict)
 _BIAS_STORE: dict[str, dict[str, list[Image]]] = defaultdict(OrderedDict)
@@ -49,6 +50,15 @@ LINES_Y: dict[int, str] = {
 CMAP_DATA = cmr.get_sub_cmap("cmr.torch", 0, 0.95)
 CMAP_ZOOM = cmr.rainforest
 CMAP_DIFF = cmr.prinsenvlag
+
+
+def convert_path_to_url(path: str) -> str:
+    REPLACES = {
+        r"^/global/cfs/cdirs/(.*)/www": r"https://portal.nersc.gov/cfs/\1",  # NERSC portal URL
+    }
+    for pattern, replacement in REPLACES.items():
+        path = re.sub(pattern, replacement, path)
+    return path
 
 
 def determine_figure_prefix(primary: FileStoreEntry) -> str:
@@ -265,7 +275,7 @@ def plot_standalone_func(images: Image | list[Image], key: str) -> None:  # noqa
             ax.set_yticks([])
 
     output_location = (
-        OUTPUT_PATH_MAP[flow_run_id] / f"standalone_{_STANDALONE_ORDERING[flow_run_id]}_{key}.webp"
+        PUBLIC_PATH_MAP[flow_run_id] / f"standalone_{_STANDALONE_ORDERING[flow_run_id]}_{key}.webp"
     ).resolve()
     logger.info(f"Saving plot to {output_location}")
     fig.savefig(output_location, dpi=600, bbox_inches="tight")

@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
-from conftest import dict_parametrize
 
 from pipeline.tasks.preprocessing.binary_offset import count_bits, sum_binary_index
+from tests.conftest import dict_parametrize
 
 
 @dict_parametrize(

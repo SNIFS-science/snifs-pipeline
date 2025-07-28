@@ -69,7 +69,8 @@ class SnifsDeploymentConfig(DeploymentConfig):
     project: str = Field(default="m112", description="Project name to use for the job for billing.")
     volumes: list[tuple[str, str, str]] = Field(
         default_factory=lambda: [
-            ("/global/cfs/cdirs/m112/snifs/data", "/data", "ro"),
+            # TODO make ro and change filestore location to output
+            ("/global/cfs/cdirs/m112/snifs/data", "/data", "rw"),
             ("/global/cfs/cdirs/m112/snifs/output", "/output", "rw"),
             ("/global/cfs/cdirs/m112/www/snifs", "/public", "rw"),
         ]
