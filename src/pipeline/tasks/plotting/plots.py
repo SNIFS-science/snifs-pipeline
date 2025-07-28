@@ -1,5 +1,4 @@
 import contextlib
-import re
 from collections import defaultdict
 from collections.abc import Callable
 from functools import wraps
@@ -53,16 +52,9 @@ CMAP_DIFF = cmr.prinsenvlag
 
 
 def convert_path_to_url(path_str: str | Path) -> str:
-    # TODO: Fix this up into env var conf
-    REPLACES = {
-        r"^/global/cfs/cdirs/(.*)/www": r"https://portal.nersc.gov/cfs/\1",  # NERSC portal URL
-        r"/public": r"https://portal.nersc.gov/cfs/m112",
-    }
     if isinstance(path_str, Path):
         path_str = str(path_str)
-
-    for pattern, replacement in REPLACES.items():
-        path_str = re.sub(pattern, replacement, path_str)
+    path_str = path_str.replace("/public", settings.public_path_replacement)
     return path_str
 
 
