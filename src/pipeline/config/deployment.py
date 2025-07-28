@@ -20,7 +20,7 @@ class DeploymentConfig(BaseModel):
         "Refer to https://docs.nersc.gov/jobs/policy/#qos-cost-factor-charge-multipliers-and-discounts for details.",
     )
     project: str = Field(
-        default="snfactry",
+        default="UNSET",
         description="Project name to use for the job for billing.",
     )
     nodes: int = Field(
@@ -56,10 +56,12 @@ class DeploymentConfig(BaseModel):
             "processes_per_node": str(self.processes_per_node),
             "memory": str(self.memory),
             "max_walltime": str(self.max_walltime),
+            "volumes": self.volumes,
         }
 
 
 class SnifsDeploymentConfig(DeploymentConfig):
+    project: str = Field(default="m112", description="Project name to use for the job for billing.")
     volumes: list[tuple[str, str, str]] = Field(
         default_factory=lambda: [
             ("/global/cfs/cdirs/m112/snifs/data", "data", "ro"),
