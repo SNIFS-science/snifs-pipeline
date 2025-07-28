@@ -80,7 +80,7 @@ class SnifsDeploymentConfig(DeploymentConfig):
             "DATA_PATH": "/data",
             "OUTPUT_PATH": "/output",
             "PUBLIC_PATH": "/public",
-            "PUBLIC_PATH_REPLACEMENT": "https://portal.nersc.gov/cfs/m112/",
+            "PUBLIC_PATH_REPLACEMENT": "https://portal.nersc.gov/cfs/m112/snifs",
         },
         description="Environment variables to set in the container.",
     )
