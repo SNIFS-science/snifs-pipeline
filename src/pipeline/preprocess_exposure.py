@@ -71,7 +71,7 @@ class PreprocessExposureConfig(FlowConfig):
         return self.output_folder / f"{PipelineStage.PREPROCESSED.value}.asdf"
 
 
-@registry.register(SnifsDeploymentConfig(max_walltime=10 * 60))
+@registry.register(SnifsDeploymentConfig(max_walltime=10 * 60, qos="debug"))
 @pipeline_flow()
 def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
     logger = get_logger()
