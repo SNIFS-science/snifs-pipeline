@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 class DeploymentConfig(BaseModel):
     work_pool_name: str = Field(
-        default="docker",
+        default="slurm",
         description="Name of the work queue to use.",
     )
     work_queue: str = Field(
