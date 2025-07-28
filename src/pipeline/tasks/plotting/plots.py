@@ -13,7 +13,7 @@ import numpy as np
 import prefect
 from matplotlib.image import AxesImage
 from matplotlib.ticker import MaxNLocator
-from prefect.artifacts import create_link_artifact
+from prefect.artifacts import create_image_artifact
 
 from pipeline import settings
 from pipeline.common import Image, Section, get_logger, pipeline_task
@@ -285,8 +285,8 @@ def plot_standalone_func(images: Image | list[Image], key: str) -> None:  # noqa
     fig.savefig(output_location, dpi=600, bbox_inches="tight")
     plt.close(fig)
     output_location.chmod(0o644)  # Make the file readable by everyone
-    create_link_artifact(
-        link=convert_path_to_url(output_location),
+    create_image_artifact(
+        image_url=convert_path_to_url(output_location),
         description=f"Standalone plot for {key}",
         key=key.replace("_", "-"),
     )
@@ -492,8 +492,8 @@ def plot_detailed_images(primary: FileStoreEntry, output_path: Path, start: str 
         fig.savefig(output_location, dpi=600, bbox_inches="tight")
         plt.close(fig)
         output_location.chmod(0o644)  # Make the file readable by everyone
-        create_link_artifact(
-            link=convert_path_to_url(output_location),
+        create_image_artifact(
+            image_url=convert_path_to_url(output_location),
             description=title,
             key="detailed-" + key.replace("_", "-"),
         )
@@ -578,8 +578,8 @@ def plot_bias_sections(primary_file: FileStoreEntry, output_folder: Path) -> Non
         logger.info(f"Saving bias section plot to {output_location}")
         fig.savefig(output_location, dpi=600, bbox_inches="tight")
         output_location.chmod(0o644)  # Make the file readable by everyone
-        create_link_artifact(
-            link=convert_path_to_url(output_location),
+        create_image_artifact(
+            image_url=convert_path_to_url(output_location),
             description=title,
             key="bias-" + key.replace("_", "-"),
         )
