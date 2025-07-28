@@ -53,8 +53,10 @@ CMAP_DIFF = cmr.prinsenvlag
 
 
 def convert_path_to_url(path_str: str | Path) -> str:
+    # TODO: Fix this up into env var conf
     REPLACES = {
         r"^/global/cfs/cdirs/(.*)/www": r"https://portal.nersc.gov/cfs/\1",  # NERSC portal URL
+        r"/public": r"https://portal.nersc.gov/cfs/m112",
     }
     if isinstance(path_str, Path):
         path_str = str(path_str)
