@@ -183,6 +183,7 @@ class FlowConfig(BaseSettings):
     def initialise_and_log(self) -> None:
         self.resolver  # noqa: B018
         self.propagate_output_path()
+        self.propagate_public_path()
         get_logger().info(f"Config initialised:\n{self.model_dump_json(indent=2)}\n")
 
 
