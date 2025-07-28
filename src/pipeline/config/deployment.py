@@ -47,6 +47,10 @@ class DeploymentConfig(BaseModel):
         default_factory=list,
         description="List of volumes to mount in the container.",
     )
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        description="Environment variables to set in the container.",
+    )
 
     def get_job_variables(self) -> dict[str, Any]:
         return {
@@ -57,6 +61,7 @@ class DeploymentConfig(BaseModel):
             "memory": str(self.memory),
             "max_walltime": str(self.max_walltime),
             "volumes": self.volumes,
+            "env": self.env,
         }
 
 
@@ -68,6 +73,14 @@ class SnifsDeploymentConfig(DeploymentConfig):
             ("/global/cfs/cdirs/m112/snifs/output", "/output", "rw"),
             ("/global/cfs/cdirs/m112/www/snifs", "/public", "rw"),
         ]
+    )
+    env: dict[str, str] = Field(
+        default_factory=lambda: {
+            "DATA_PATH": "/data",
+            "OUTPUT_PATH": "/output",
+            "PUBLIC_PATH": "/public",
+        },
+        description="Environment variables to set in the container.",
     )
 
 
