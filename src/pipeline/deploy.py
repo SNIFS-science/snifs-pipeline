@@ -54,3 +54,4 @@ if __name__ == "__main__":
     deployment_map = get_deployments()
     register_deployments(deployment_map)
     logger.info("Deployment registration complete.")
+    # For a good debug run, try setting the primary file to /data/raw/runs/run_id=25_056_084/science_red.fits

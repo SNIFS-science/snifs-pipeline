@@ -10,7 +10,7 @@ from astropy.io import fits
 from pandera.engines.polars_engine import DateTime
 from pandera.polars import DataFrameModel, Field
 from pandera.typing.polars import DataFrame, Series
-from pydantic import BaseModel, BeforeValidator, FilePath, ValidationInfo
+from pydantic import BaseModel, BeforeValidator, ValidationInfo
 
 from pipeline.common.log import get_logger
 
@@ -78,12 +78,12 @@ class FileType(StrEnum):
     BIAS = "BIAS"
 
     @property
-    def Path(self) -> type[FilePath | None]:
-        return Annotated[FilePath | None, BeforeValidator(partial(resolve_type, file_type=self))]  # type: ignore
+    def OptionalPath(self) -> type[Path | None]:
+        return Annotated[Path | None, BeforeValidator(partial(resolve_type, file_type=self, must_match=False))]  # type: ignore
 
     @property
-    def OptionalPath(self) -> type[FilePath | None]:
-        return Annotated[FilePath | None, BeforeValidator(partial(resolve_type, file_type=self, must_match=False))]  # type: ignore
+    def Path(self) -> type[Path | None]:
+        return Annotated[Path | None, BeforeValidator(partial(resolve_type, file_type=self))]  # type: ignore
 
 
 class FileStoreModel(DataFrameModel):
