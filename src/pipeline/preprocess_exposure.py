@@ -52,6 +52,14 @@ class PreprocessExposureConfig(FlowConfig):
             / f"processed_runs/run_id={primary.run_id}/obstype={primary.type}/channel={primary.channel}"
         )
 
+    @cached_property
+    def public_folder(self) -> Path:
+        primary = self.fetch_metadata(self.primary_file)
+        return (
+            self.resolver.public_path
+            / f"processed_runs/run_id={primary.run_id}/obstype={primary.type}/channel={primary.channel}"
+        )
+
     @property
     def raw_file_duplication_path(self) -> Path:
         """This is the path where the raw file will be duplicated to, for posterity."""

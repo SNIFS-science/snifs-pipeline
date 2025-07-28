@@ -19,6 +19,7 @@ class Resolver(BaseModel):
 
     data_path: Path
     output_path: Path
+    public_path: Path
 
     @field_validator("file_store_path")
     @classmethod
@@ -164,8 +165,15 @@ class FlowConfig(BaseSettings):
     def output_folder(self) -> Path:
         raise NotImplementedError("This method should be overridden in subclasses to provide the output folder path.")
 
+    @cached_property
+    def public_folder(self) -> Path:
+        raise NotImplementedError("This method should be overridden in subclasses to provide the public folder path.")
+
     def propagate_output_path(self) -> None:
         OUTPUT_PATH_MAP[get_run_id()] = self.output_folder
+
+    def propagate_public_path(self) -> None:
+        PUBLIC_PATH_MAP[get_run_id()] = self.public_folder
 
     def initialise_and_log(self) -> None:
         self.resolver  # noqa: B018
@@ -175,3 +183,4 @@ class FlowConfig(BaseSettings):
 
 # A map from flow_id to the output path for explicit access
 OUTPUT_PATH_MAP: dict[str, Path] = {}
+PUBLIC_PATH_MAP: dict[str, Path] = {}
