@@ -3,8 +3,6 @@ from typing import Any, ParamSpec, TypeVar
 from prefect import Flow
 from pydantic import BaseModel, Field
 
-from pipeline.config.global_settings import settings
-
 
 class DeploymentConfig(BaseModel):
     work_pool_name: str = Field(
@@ -34,7 +32,7 @@ class DeploymentConfig(BaseModel):
         description="Number of processes to allocate per node.",
     )
     memory: int = Field(
-        default=1024,
+        default=4096,
         description="Memory in MB to allocate.",
     )
     max_walltime: int = Field(
@@ -45,11 +43,12 @@ class DeploymentConfig(BaseModel):
         default="ghcr.io/snifs-science/snifs-pipeline/image:latest",
         description="Docker image to use.",
     )
+    volumes: list[tuple[str, str, str]] = Field(
+        default_factory=list,
+        description="List of volumes to mount in the container.",
+    )
 
     def get_job_variables(self) -> dict[str, Any]:
-        return {
-            "volumes": [f"{settings.data_path}:/data:rw", f"{settings.output_path}:/output:rw"],
-        }  # TODO: Blanking this out while we play with the docker worker
         return {
             "qos": self.qos,
             "project": self.project,
@@ -58,6 +57,16 @@ class DeploymentConfig(BaseModel):
             "memory": str(self.memory),
             "max_walltime": str(self.max_walltime),
         }
+
+
+class SnifsDeploymentConfig(DeploymentConfig):
+    volumes: list[tuple[str, str, str]] = Field(
+        default_factory=lambda: [
+            ("/global/cfs/cdirs/m112/snifs/data", "data", "ro"),
+            ("/global/cfs/cdirs/m112/snifs/output", "output", "rw"),
+            ("/global/cfs/cdirs/m112/www/snifs", "public", "rw"),
+        ]
+    )
 
 
 P = ParamSpec("P")

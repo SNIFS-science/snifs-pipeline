@@ -19,8 +19,6 @@ def get_deployments() -> dict[str, list[RunnerDeployment]]:
             work_queue_name=deployment.work_queue,
             job_variables=deployment.get_job_variables(),
         )
-        # Prefect keeps the src location, but when we build our image we put it
-        # at /, so src/... becomes /src/...
         runner_deployment.entrypoint = "/" + runner_deployment.entrypoint  # type: ignore
         deployments[deployment.image].append(runner_deployment)
     return deployments
@@ -49,10 +47,10 @@ def register_deployments(deployment_map: dict[str, list[RunnerDeployment]]) -> N
 
 
 if __name__ == "__main__":
-    from prefect.settings import PREFECT_API_URL, temporary_settings
-
-    with temporary_settings({PREFECT_API_URL: "http://localhost:4200/api"}):
-        logger.info("Starting deployment registration...")
-        deployment_map = get_deployments()
-        register_deployments(deployment_map)
-        logger.info("Deployment registration complete.")
+    url = "https://docs-3.prefect.io/v3/how-to-guides/cloud/connect-to-cloud#manually-configure-prefect-api-settings"
+    logger.info("Please ensure you are logging into prefect cloud first.")
+    logger.info(f"This probably means setting env vars as per {url}")
+    logger.info("Starting deployment registration...")
+    deployment_map = get_deployments()
+    register_deployments(deployment_map)
+    logger.info("Deployment registration complete.")

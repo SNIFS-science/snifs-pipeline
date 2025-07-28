@@ -6,7 +6,7 @@ from pydantic import Field, computed_field
 
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
-from pipeline.config.deployment import DeploymentConfig, registry
+from pipeline.config.deployment import SnifsDeploymentConfig, registry
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig
 from pipeline.tasks.loaders import clear_output_path, load_headers, load_images_from_file
@@ -71,28 +71,7 @@ class PreprocessExposureConfig(FlowConfig):
         return self.output_folder / f"{PipelineStage.PREPROCESSED.value}.asdf"
 
 
-# @plot()
-# def debug_comparison(image: Image, channel: str, run_id: str | None, obstype: str) -> Image:
-#     import numpy as np
-#     assert run_id is not None, "Run ID must be provided for debugging comparison."
-#     # 005 and 006 are R and B continuum
-#     # 011 are the arcs
-#     data_dump_dir = Path(__file__).parents[2] / ".data_dump"
-#     expected_pattern = f"P{run_id}_*_{channel}.fits"
-#     found_files = list(data_dump_dir.glob(expected_pattern))
-#     if len(found_files) > 1:
-#         extra_match = f".*_011_0._{channel}.fits" if obstype == "ARC" else f".*_00[56]_0._{channel}.fits"
-#         found_files = [f for f in found_files if re.match(extra_match, f.name)]
-#     assert len(found_files) == 1, (
-#         f"Expected exactly one file matching {expected_pattern}, found {len(found_files)}: {found_files}."
-#     )
-#     get_logger().info(f"Debugging comparison with file: {found_files[0]}")
-#     dan = Image.from_fits_file(found_files[0], transpose=True)
-#     dan.variance[dan.variance > 1e6] = np.inf
-#     return dan
-
-
-@registry.register(DeploymentConfig(max_walltime=20 * 60))
+@registry.register(SnifsDeploymentConfig(max_walltime=10 * 60))
 @pipeline_flow()
 def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
     logger = get_logger()
