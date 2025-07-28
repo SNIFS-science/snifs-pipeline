@@ -45,8 +45,10 @@ def load_headers(science_file: Path, hdu_index: int = 0) -> Headers:
 
 
 @pipeline_task()
-def clear_output_path(output_path: Path) -> None:
+def clear_directory(output_path: Path) -> None:
     """Clear the output path for the given primary file."""
     if output_path.exists():
         [f.unlink() for f in output_path.glob("*")]
+    else:
+        output_path.mkdir(parents=True, exist_ok=True)
     get_logger().info(f"Cleared output path: {output_path}")

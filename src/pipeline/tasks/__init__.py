@@ -3,7 +3,7 @@ from pipeline.tasks.calibrate import calibrate_with_flats
 from pipeline.tasks.cfht_weather import update_cfht_weather
 from pipeline.tasks.correct_dichroic import correct_dichoric
 from pipeline.tasks.extract_snifs_run_logs import extract_snifs_run_logs
-from pipeline.tasks.loaders import clear_output_path, load_headers, load_images_from_file
+from pipeline.tasks.loaders import clear_directory, load_headers, load_images_from_file
 from pipeline.tasks.remove_continuum import remove_continuum
 
 __all__ = [

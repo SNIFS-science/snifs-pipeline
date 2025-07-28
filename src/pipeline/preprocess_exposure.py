@@ -9,7 +9,7 @@ from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.config.deployment import SnifsDeploymentConfig, registry
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig
-from pipeline.tasks.loaders import clear_output_path, load_headers, load_images_from_file
+from pipeline.tasks.loaders import clear_directory, load_headers, load_images_from_file
 from pipeline.tasks.plotting import plot_bias_sections, plot_detailed_images
 from pipeline.tasks.preprocessing import (
     add_overscan_variance,
@@ -84,7 +84,8 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
     assert conf.binary_offset_model_file is not None, "Binary offset model file must be provided."
     assert conf.dark_model_file is not None, "Dark model file must be provided."
 
-    clear_output_path(conf.output_folder)
+    clear_directory(conf.output_folder)
+    clear_directory(conf.public_folder)
     images = load_images_from_file(conf.primary_file, transpose=True)
     primary_headers = load_headers(conf.primary_file)
 
