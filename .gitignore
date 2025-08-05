@@ -70,3 +70,6 @@ data/raw/misc/type=DARK
 data/raw/misc/type=BIAS
 /*.png
 *.tar.gz
+*.db
+*.sqlite
+*.sqlite3

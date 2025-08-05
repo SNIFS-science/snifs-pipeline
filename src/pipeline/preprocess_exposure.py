@@ -10,7 +10,7 @@ from pipeline.config.deployment import SnifsDeploymentConfig, registry
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig
 from pipeline.tasks.loaders import clear_directory, load_headers, load_images_from_file
-from pipeline.tasks.plotting import plot_bias_sections, plot_detailed_images
+from pipeline.tasks.plotting.plots import plot_bias_sections, plot_detailed_images
 from pipeline.tasks.preprocessing import (
     add_overscan_variance,
     apply_custom_red_flat,
@@ -22,12 +22,13 @@ from pipeline.tasks.preprocessing import (
     ensure_float64,
     handle_saturation,
     handle_special_red_cosmetics,
-    remove_cosmic_rays,
     split_and_standardise,
     subtract_dark,
     subtract_offset,
 )
+from pipeline.tasks.preprocessing.cosmic_rays import remove_cosmic_rays
 from pipeline.tasks.preprocessing.models import subtract_bias_and_add_poisson
+from pipeline.tasks.summaries import summarise_exposure, write_summary
 
 
 class PreprocessExposureConfig(FlowConfig):
@@ -67,8 +68,13 @@ class PreprocessExposureConfig(FlowConfig):
 
     @computed_field
     @property
-    def output_file(self) -> Path:
+    def output_image_file(self) -> Path:
         return self.output_folder / f"{PipelineStage.PREPROCESSED.value}.asdf"
+
+    @computed_field
+    @property
+    def output_summary_file(self) -> Path:
+        return self.public_folder / f"{PipelineStage.PREPROCESSED.value}_summary.json"
 
 
 @registry.register(SnifsDeploymentConfig(max_walltime=10 * 60, qos="debug"))
@@ -115,11 +121,14 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
     # debug_comparison(image, primary.channel, primary.run_id, primary.type)
     conf.raw_file_duplication_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(conf.primary_file, conf.raw_file_duplication_path)
-    image.to_asdf(conf.output_file)
+    image.to_asdf(conf.output_image_file)
     plot_bias_sections(primary, conf.public_folder)
     plot_detailed_images(primary, conf.public_folder)
 
-    return conf.output_file
+    summary = summarise_exposure(image, primary, conf.output_summary_file, discriminator="preprocess_exposure")
+    write_summary(conf.resolver, summary)
+
+    return conf.output_image_file
 
 
 if __name__ == "__main__":

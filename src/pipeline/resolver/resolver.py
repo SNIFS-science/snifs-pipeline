@@ -16,6 +16,7 @@ class Resolver(BaseModel):
     # TODO: discuss how cloud focused this should be.
     # TODO: Ideally this resolve had both local pref and cloud fetching built in.
     file_store_path: Path
+    database_path: Path
 
     data_path: Path
     output_path: Path
@@ -53,6 +54,8 @@ class Resolver(BaseModel):
         kwargs.update(kwargs)
         if "file_store_path" not in kwargs:
             kwargs["file_store_path"] = kwargs["data_path"] / "filestore.parquet"
+        if "database_path" not in kwargs:
+            kwargs["database_path"] = kwargs["data_path"] / "database.sqlite"
         return cls(**kwargs)
 
     def ensure_file_exists(self, file_path: Path) -> None:

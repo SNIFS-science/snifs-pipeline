@@ -1,3 +1,4 @@
+import sqlite3
 from functools import lru_cache
 
 import polars as pl
@@ -8,11 +9,7 @@ from pipeline.resolver.common import FileStoreDataFrame, extract_file_details
 from pipeline.resolver.resolver import Resolver
 
 
-@lru_cache
-@pipeline_task()
-def build_filestore(refresh: bool = False) -> Resolver:
-    resolver = Resolver.create()
-
+def refresh_filestore(resolver: Resolver, refresh: bool = False) -> None:
     logger = get_logger()
     file_store = resolver.file_store if resolver.file_store_exists() else None
     analysed_files = [] if file_store is None else file_store["file_path"].to_list()
@@ -46,6 +43,51 @@ def build_filestore(refresh: bool = False) -> Resolver:
     resolver.save_filestore(df)
     # Validate the file store exists and can be loaded
     _ = resolver.file_store
+
+
+def build_database(resolver: Resolver) -> None:
+    logger = get_logger()
+    logger.info(f"Building database at {resolver.database_path}")
+
+    if not resolver.database_path.exists():
+        resolver.database_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with sqlite3.connect(resolver.database_path) as conn:
+        cursor = conn.cursor()
+        # Create tables and indices as needed
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS summaries (
+                task_run_id TEXT PRIMARY KEY,
+                flow_run_id TEXT NOT NULL,
+                discriminator TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS summary_info (
+                task_run_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value_str TEXT NOT NULL,
+                value_num REAL,
+                PRIMARY KEY (task_run_id, key),
+                FOREIGN KEY (task_run_id) REFERENCES summaries(task_run_id)
+            );
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_summaries_discriminator ON summaries(discriminator);
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_summary_info_key ON summary_info(key);
+        """)
+        conn.commit()
+
+
+@lru_cache
+@pipeline_task()
+def build_filestore(refresh: bool = False) -> Resolver:
+    resolver = Resolver.create()
+    refresh_filestore(resolver, refresh)
+    build_database(resolver)
     return resolver
 
 
