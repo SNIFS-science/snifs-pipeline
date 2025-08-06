@@ -26,9 +26,10 @@ def summarise_exposure(
     start_time = context.task_run.start_time
 
     content = {
-        **file_store_data,
+        **{k: v for k, v in file_store_data.items() if v is not None and v != ""},
         "flow_run_id": str(context.task_run.flow_run_id),
         "task_run_id": str(context.task_run.id),
+        "api_url": str(context.client.api_url),
         "num_bad_pixels": num_bad_pixels,
         "discriminator": discriminator,
     }

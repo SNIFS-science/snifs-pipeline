@@ -10,7 +10,7 @@ from pipeline.config.deployment import SnifsDeploymentConfig, registry
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig
 from pipeline.tasks.loaders import clear_directory, load_headers, load_images_from_file
-from pipeline.tasks.plotting.plots import plot_bias_sections, plot_detailed_images
+from pipeline.tasks.plotting.plots import plot_bias_sections, plot_detailed_images  # noqa: F401
 from pipeline.tasks.preprocessing import (
     add_overscan_variance,
     apply_custom_red_flat,
@@ -26,7 +26,7 @@ from pipeline.tasks.preprocessing import (
     subtract_dark,
     subtract_offset,
 )
-from pipeline.tasks.preprocessing.cosmic_rays import remove_cosmic_rays
+from pipeline.tasks.preprocessing.cosmic_rays import remove_cosmic_rays  # noqa: F401
 from pipeline.tasks.preprocessing.models import subtract_bias_and_add_poisson
 from pipeline.tasks.summaries import summarise_exposure, write_summary
 
@@ -114,7 +114,7 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
     # Apply the custom red flat if we can't find a flat at all, or we're processing a red flat.
     if primary.channel == "R" and (conf.flat_image_file is None or conf.flat_image_file == conf.primary_file):
         image = apply_custom_red_flat(image)
-    image = remove_cosmic_rays(image)
+    # image = remove_cosmic_rays(image)
 
     # TODO: need add_parangle.py from Daniel, along with the parangel.txt file to get the information from
 
@@ -122,8 +122,8 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
     conf.raw_file_duplication_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(conf.primary_file, conf.raw_file_duplication_path)
     image.to_asdf(conf.output_image_file)
-    plot_bias_sections(primary, conf.public_folder)
-    plot_detailed_images(primary, conf.public_folder)
+    # plot_bias_sections(primary, conf.public_folder)
+    # plot_detailed_images(primary, conf.public_folder)
 
     summary = summarise_exposure(image, primary, conf.output_summary_file, discriminator="preprocess_exposure")
     write_summary(conf.resolver, summary)
@@ -135,8 +135,8 @@ if __name__ == "__main__":
     raw_dir = Path(__file__).parents[2] / "data/raw"
     files = [
         raw_dir / "runs/run_id=25_057_001/continuum_red.fits",
-        # raw_dir / "runs/run_id=25_159_030/continuum_red.fits",
-        # raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",
+        raw_dir / "runs/run_id=25_159_030/continuum_red.fits",
+        raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",
     ]
     for file in files:
         config = PreprocessExposureConfig(primary_file=file)
