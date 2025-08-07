@@ -14,23 +14,24 @@ from pipeline.resolver.resolver import Resolver
 
 
 @pipeline_task()
-def summarise_exposure(
+def summarise_image(
     image: Image, file: FileStoreEntry, output_location: Path, discriminator: str
 ) -> dict[str, str | int | float | dt]:
     file_store_data = file.model_dump(exclude_none=True)
     good_pixels = np.isfinite(image.data) & np.isfinite(image.variance)
-    num_bad_pixels = int(np.sum(~good_pixels, axis=None))
-
+    if "NUM_BAD_PIXELS" not in image.header:
+        num_bad_pixels = int(np.sum(~good_pixels, axis=None))
+        image.header.set("NUM_BAD_PIXELS", num_bad_pixels, metric=True)
     output_location.parent.mkdir(parents=True, exist_ok=True)
     context: TaskRunContext = get_run_context()  # type: ignore
     start_time = context.task_run.start_time
 
     content = {
         **{k: v for k, v in file_store_data.items() if v is not None and v != ""},
+        **image.header.get_metrics(lowercase=True),
         "flow_run_id": str(context.task_run.flow_run_id),
         "task_run_id": str(context.task_run.id),
         "api_url": str(context.client.api_url),
-        "num_bad_pixels": num_bad_pixels,
         "discriminator": discriminator,
     }
     if start_time is not None:

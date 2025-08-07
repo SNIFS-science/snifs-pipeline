@@ -25,6 +25,7 @@ def remove_cosmic_rays(image: Image) -> Image:
     image.data = out._data  # type: ignore
     if out.mask is not None:
         image.add_function_lineage(f"Masked out {out.mask.sum()} pixels as cosmic rays")
+        image.header.set("NUM_COSMIC", int(out.mask.sum()), metric=True)
     else:
         image.add_function_lineage("No cosmic rays detected")
     return image

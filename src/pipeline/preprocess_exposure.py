@@ -28,7 +28,7 @@ from pipeline.tasks.preprocessing import (
 )
 from pipeline.tasks.preprocessing.cosmic_rays import remove_cosmic_rays  # noqa: F401
 from pipeline.tasks.preprocessing.models import subtract_bias_and_add_poisson
-from pipeline.tasks.summaries import summarise_exposure, write_summary
+from pipeline.tasks.summaries import summarise_image, write_summary
 
 
 class PreprocessExposureConfig(FlowConfig):
@@ -125,7 +125,7 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
     # plot_bias_sections(primary, conf.public_folder)
     # plot_detailed_images(primary, conf.public_folder)
 
-    summary = summarise_exposure(image, primary, conf.output_summary_file, discriminator="preprocess_exposure")
+    summary = summarise_image(image, primary, conf.output_summary_file, discriminator="preprocess_exposure")
     write_summary(conf.resolver, summary)
 
     return conf.output_image_file

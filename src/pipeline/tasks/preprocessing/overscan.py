@@ -64,7 +64,7 @@ def add_overscan_variance(image: Image) -> Image:
     _, var, _ = image.get_bias_section()
     variance = np.mean(np.var(var[:, 1:-1], ddof=1, axis=0))
     rdnoise = np.sqrt(variance)
-    image.header["RDNOISE"] = rdnoise
+    image.header.set("RDNOISE", rdnoise, metric=True)
     image.variance += variance
     image.add_function_lineage(f"Added overscan variance: {variance:0.3f} to image (aka RDNOISE={rdnoise:0.3f} ADU).")
     return image
@@ -125,8 +125,8 @@ def subtract_offset(image: Image) -> Image:
     overscan_median = float(np.median(offset_centre))
     max_overscan = float(np.max(offset_centre))
     # ^ Don't ask me why it also compares to double the first difference.
-    image.header["OVSCMED"] = overscan_median
-    image.header["OVSCMAX"] = max_overscan
+    image.header.set("OVSCMED", overscan_median, metric=True)
+    image.header.set("OVSCMAX", max_overscan, metric=True)
     image.add_function_lineage(f"Applied overscan correction: median={overscan_median:0.4f}, max={max_overscan:0.4f}")
 
     return image

@@ -126,7 +126,7 @@ class Image(BaseModel):
     @classmethod
     def from_array_and_dict(
         cls,
-        header: dict[str, str | bool | int | float | list[str] | list[int] | list[float]],
+        header: Headers | dict[str, str | bool | int | float | list[str] | list[int] | list[float]],
         data: np.ndarray,
         variance: np.ndarray,
         lineage: list[Lineage] | None = None,
@@ -134,7 +134,9 @@ class Image(BaseModel):
         """
         Create a DataHeader from an array and a dictionary.
         """
-        return Image(data=data, header=Headers(**header), variance=variance, lineage=lineage or [])
+        if isinstance(header, dict):
+            header = Headers.from_dict(header)
+        return Image(data=data, header=header, variance=variance, lineage=lineage or [])
 
     @classmethod
     def from_fits_file(
