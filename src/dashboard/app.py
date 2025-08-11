@@ -32,8 +32,8 @@ with col1:
 
 with col2:
     st.markdown("### Overscan RMS")
-    st.plotly_chart(plot_preprocess(summaries, y_col="rdnoise"))
+    st.plotly_chart(plot_preprocess(summaries, y_col="rdnoise_num"))
 
 with col3:
     st.markdown("### Overscan Median")
-    st.plotly_chart(plot_preprocess(summaries, y_col="ovscmed"))
+    st.plotly_chart(plot_preprocess(summaries, y_col="ovscmed_num"))

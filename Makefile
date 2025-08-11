@@ -32,5 +32,6 @@ docker_prefect:
 prefect:
 	uv run prefect server start
 
+dashboard: export PYTHONPATH=src
 dashboard:
 	uv run streamlit run src/dashboard/app.py --server.port 8501

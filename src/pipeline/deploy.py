@@ -3,6 +3,7 @@ from collections import defaultdict
 from loguru import logger
 from prefect import deploy
 from prefect.deployments.runner import RunnerDeployment
+from prefect.settings import PREFECT_API_URL, temporary_settings
 
 from pipeline import registry
 
@@ -47,11 +48,10 @@ def register_deployments(deployment_map: dict[str, list[RunnerDeployment]]) -> N
 
 
 if __name__ == "__main__":
-    url = "https://docs-3.prefect.io/v3/how-to-guides/cloud/connect-to-cloud#manually-configure-prefect-api-settings"
-    logger.info("Please ensure you are logging into prefect cloud first.")
-    logger.info(f"This probably means setting env vars as per {url}")
-    logger.info("Starting deployment registration...")
-    deployment_map = get_deployments()
-    register_deployments(deployment_map)
-    logger.info("Deployment registration complete.")
-    # For a good debug run, try setting the primary file to /data/raw/runs/run_id=25_056_084/science_red.fits
+    url = "http://prefect.prefect-pipelines.production.svc.spin.nersc.org/api"
+    logger.info(f"Connecting to Prefect server at {url}")
+    with temporary_settings({PREFECT_API_URL: url}):
+        logger.info("Starting deployment registration...")
+        deployment_map = get_deployments()
+        register_deployments(deployment_map)
+        logger.info("Deployment registration complete.")
