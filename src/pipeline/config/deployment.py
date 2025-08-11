@@ -56,10 +56,10 @@ class DeploymentConfig(BaseModel):
         return {
             "qos": self.qos,
             "project": self.project,
-            "nodes": str(self.nodes),
-            "processes_per_node": str(self.processes_per_node),
-            "memory": str(self.memory),
-            "max_walltime": str(self.max_walltime),
+            "nodes": self.nodes,
+            "processes_per_node": self.processes_per_node,
+            "memory": self.memory,
+            "max_walltime": self.max_walltime,
             "volumes": self.volumes,
             "env": self.env,
         }
