@@ -1,5 +1,6 @@
 from itertools import cycle
 
+import polars as pl
 import polars.selectors as cs
 import streamlit as st
 
@@ -28,14 +29,21 @@ st.subheader("Summaries")
 
 st.plotly_chart(plot_summary(summaries))
 
-st.subheader("Preprocess Exposure Breakdown")
-cols_to_plot = summaries.select(cs.ends_with("_num") & ~cs.contains("time")).columns
-cols = cycle(st.columns(3))
-colour_palette = colour_palette.colour_cycler()
+if selected_discriminator is None or selected_discriminator == "preprocess_exposure":
+    st.subheader("Preprocess Exposure Breakdown")
+    cols_to_plot = (
+        summaries.filter(pl.col("discriminator") == "preprocess_exposure")
+        .select(cs.ends_with("_num") & ~cs.contains("time"))
+        .columns
+    )
+    # Remove columns which have only one unique value
+    cols_to_plot = [col for col in cols_to_plot if summaries[col].n_unique() > 1]
+    cols = cycle(st.columns(3))
+    colour_palette = colour_palette.colour_cycler()
 
-for column_name in cols_to_plot:
-    col = next(cols)
-    colour = next(colour_palette)
-    with col:
-        st.markdown(f"### {column_name.replace('_num', '').replace('_', ' ').title()}")
-        st.plotly_chart(plot_preprocess(summaries, y_col=column_name, colour=colour))
+    for column_name in cols_to_plot:
+        col = next(cols)
+        colour = next(colour_palette)
+        with col:
+            st.markdown(f"### {column_name.replace('_num', '').replace('_', ' ').title()}")
+            st.plotly_chart(plot_preprocess(summaries, y_col=column_name, colour=colour))
