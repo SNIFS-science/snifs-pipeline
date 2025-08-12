@@ -24,3 +24,4 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       uv sync --all-extras --frozen --no-dev
 
 COPY src /src
+COPY .streamlit /src/.streamlit

@@ -59,8 +59,8 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> I
     for i, image in enumerate(images):
         primary_headers[f"CCD{i}GAIN"] = image.header.get_float("GAIN")
         primary_headers[f"RDNOISE{i}"] = image.header.get_float("RDNOISE") * image.header.get_float("GAIN")
-        primary_headers[f"OVSCMAX{i}"] = image.header.get_float("OVSCMAX")
-        primary_headers[f"OVSCMED{i}"] = image.header.get_float("OVSCMED")
+        primary_headers[f"overscan_max{i}"] = image.header.get_float("overscan_max")
+        primary_headers[f"overscan_median{i}"] = image.header.get_float("overscan_median")
         primary_headers[f"OEPARAM{i}"] = image.header.get_float_list("OEPARAM")
         primary_headers["CCDSEC"] = f"[1:{compound_data.shape[0]},1:{compound_data.shape[1]}]"
 
@@ -68,7 +68,7 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> I
     saturations: list[float] = [
         (
             image.header.get_float("SATURATE")
-            - image.header.get_float("OVSCMAX")
+            - image.header.get_float("overscan_max")
             - abs(
                 max(
                     image.header.get_float_list("OEPARAM")[0],
@@ -82,7 +82,7 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> I
         for image in images
     ]
     primary_headers["SATURATE"] = saturations
-    for key in ["RDNOISE", "OVSCMED", "GAIN", "AMPSEC", "DETSEC", "BIASSEC"]:
+    for key in ["RDNOISE", "overscan_median", "GAIN", "AMPSEC", "DETSEC", "BIASSEC"]:
         if key in primary_headers:
             del primary_headers[key]  # These are not needed in the final header
 

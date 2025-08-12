@@ -1,5 +1,9 @@
+from itertools import cycle
+
+import polars.selectors as cs
 import streamlit as st
 
+from dashboard.colours import colour_palette
 from dashboard.database import SyncDatabase
 from dashboard.plots import plot_preprocess, plot_summary
 from pipeline.resolver import Resolver
@@ -25,15 +29,13 @@ st.subheader("Summaries")
 st.plotly_chart(plot_summary(summaries))
 
 st.subheader("Preprocess Exposure Breakdown")
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.markdown("### Number of Bad Pixels")
-    st.plotly_chart(plot_preprocess(summaries, y_col="num_bad_pixels_num"))
+cols_to_plot = summaries.select(cs.ends_with("_num") & ~cs.contains("time")).columns
+cols = cycle(st.columns(3))
+colour_palette = colour_palette.colour_cycler()
 
-with col2:
-    st.markdown("### Overscan RMS")
-    st.plotly_chart(plot_preprocess(summaries, y_col="rdnoise_num"))
-
-with col3:
-    st.markdown("### Overscan Median")
-    st.plotly_chart(plot_preprocess(summaries, y_col="ovscmed_num"))
+for column_name in cols_to_plot:
+    col = next(cols)
+    colour = next(colour_palette)
+    with col:
+        st.markdown(f"### {column_name.replace('_num', '').replace('_', ' ').title()}")
+        st.plotly_chart(plot_preprocess(summaries, y_col=column_name, colour=colour))

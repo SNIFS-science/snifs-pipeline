@@ -62,4 +62,7 @@ class SyncDatabase:
                 )
             else:
                 df_wide = df_wide.with_columns(link=pl.lit(None))
+
+            if "name" not in df_wide.columns:
+                df_wide = df_wide.with_columns(name=pl.col("run_id") + "_" + pl.col("channel"))
             return df_wide

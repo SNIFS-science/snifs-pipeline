@@ -125,8 +125,8 @@ def subtract_offset(image: Image) -> Image:
     overscan_median = float(np.median(offset_centre))
     max_overscan = float(np.max(offset_centre))
     # ^ Don't ask me why it also compares to double the first difference.
-    image.header.set("OVSCMED", overscan_median, metric=True)
-    image.header.set("OVSCMAX", max_overscan, metric=True)
+    image.header.set("overscan_median", overscan_median, metric=True)
+    image.header.set("overscan_max", max_overscan, metric=True)
     image.add_function_lineage(f"Applied overscan correction: median={overscan_median:0.4f}, max={max_overscan:0.4f}")
 
     return image

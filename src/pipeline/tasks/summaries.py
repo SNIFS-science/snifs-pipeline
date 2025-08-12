@@ -68,6 +68,12 @@ def write_summary(resolver: Resolver, content: dict[str, str | int | float | dt]
             elif isinstance(val, (int, float)):
                 value_str = str(val)
                 value_num = val
+            elif isinstance(val, list):
+                value_str = json.dumps(val)
+                value_num = None
+            elif isinstance(val, bool):
+                value_str = str(val).lower()
+                value_num = 1 if val else 0
             else:
                 raise ValueError(f"Unsupported type for key '{key}': {type(val)}")
             cursor.execute(

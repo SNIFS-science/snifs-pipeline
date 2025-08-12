@@ -7,13 +7,13 @@ def plot_summary(df: pl.DataFrame) -> go.Figure:
     fig = go.Figure()
     xs = df["created_at"].to_list()
     links = df["link"].to_list()
-    run_ids = df["run_id"].to_list()
+    names = df["name"].to_list()
     texts = []
-    for link, run_id in zip(links, run_ids, strict=True):
+    for link, name in zip(links, names, strict=True):
         if link:
-            texts.append(f"<a href='{link}' target='_blank'>{run_id}</a>")
+            texts.append(f"<a href='{link}' target='_blank'>{name}</a>")
         else:
-            texts.append(run_id)
+            texts.append(name)
     y_ticks = df["discriminator"].unique().to_list()
     y_val_mapping = {y: i for i, y in enumerate(y_ticks)}
     ys = df["discriminator"].replace(y_val_mapping).to_list()
@@ -46,20 +46,15 @@ def plot_summary(df: pl.DataFrame) -> go.Figure:
     return fig
 
 
-def plot_preprocess(df: pl.DataFrame, y_col: str = "num_bad_pixels_num") -> go.Figure:
+def plot_preprocess(df: pl.DataFrame, y_col: str = "num_bad_pixels_num", colour: str | None = None) -> go.Figure:
     # Here we want to follow a similar method to the above plot, but we'll
     # plot the number of bad pixels on the y-axis and the created_at on the x-axis.
     fig = go.Figure()
     xs = df["created_at"].to_list()
     ys = df[y_col].to_list()
     texts = []
-    links = df["link"].to_list()
-    run_ids = df["run_id"].to_list()
-    for link, run_id in zip(links, run_ids, strict=True):
-        if link:
-            texts.append(f"<a href='{link}' target='_blank'>{run_id}</a>")
-        else:
-            texts.append(run_id)
+    for row in df.to_dicts():
+        texts.append(f"<a href='{row['link']}' target='_blank'>{row['name']}</a>")
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -70,10 +65,11 @@ def plot_preprocess(df: pl.DataFrame, y_col: str = "num_bad_pixels_num") -> go.F
             text=texts,
             textposition="top center",
             hovertemplate=f"<b>Created At:</b> %{{x}}<br><b>{y_col}:</b> %{{y}}<extra></extra>",
+            line={"color": colour} if colour else None,
         )
     )
     fig.update_xaxes(title_text="Created At")
-    fig.update_yaxes(title_text=y_col.replace("_", " ").title())
+    fig.update_yaxes(title_text=y_col.replace("_num", "").replace("_", " ").title())
     fig.update_layout(
         hovermode="closest",
         height=600,
