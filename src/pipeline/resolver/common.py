@@ -60,6 +60,7 @@ def resolve_type(
 class PipelineStage(StrEnum):
     RAW = "0_RAW"
     PREPROCESSED = "1_PREPROCESSED"
+    PROCESSED = "2_PROCESSED"
 
 
 class FileType(StrEnum):
@@ -150,7 +151,7 @@ HEADER_MAP = {
 }
 
 
-def extra_details_from_fits(path: Path) -> dict[str, str | int | float | dt]:
+def extract_details_from_fits(path: Path) -> dict[str, str | int | float | dt]:
     values = {}
     with fits.open(path) as hdul:  # type: ignore
         # Assume headers are in the first HDU
@@ -174,17 +175,50 @@ def extra_details_from_fits(path: Path) -> dict[str, str | int | float | dt]:
     return values
 
 
-def extract_file_details(path: Path, relative_path: Path) -> FileStoreDataFrame:
+def extract_details_from_asdf(path: Path) -> dict[str, str | int | float | dt]:
+    values = {}
+    import asdf
+    from asdf import AsdfFile
+
+    af: AsdfFile
+    with asdf.open(path) as af:
+        if "metadata" not in af:
+            return values
+        metadata = {k.lower(): v for k, v in af["metadata"].items()}
+
+        for column in FileStoreModel.to_schema().columns:
+            expected_column_name = HEADER_MAP.get(column, column)
+            if expected_column_name in metadata:
+                value = metadata[expected_column_name]
+                if isinstance(value, str):
+                    value = value.strip()
+                if column.startswith("time"):
+                    if isinstance(value, int):
+                        value = dt.fromtimestamp(value, tz=tz.utc)
+                    elif isinstance(value, str):
+                        value = dt.strptime(value, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=tz.utc)
+                values[column] = value
+
+        values["num_extensions"] = len(af.tree.keys()) - 2  # type: ignore
+        # As there will also be the extensions and the asdf_library, we subtract 2
+        values["num_data_extensions"] = len(af.search(type_="NDArrayType").paths)  # type: ignore
+    return values
+
+
+def extract_file_details(path: Path) -> FileStoreDataFrame:
+    path = path.resolve()
     values = {
-        "file_path": str(relative_path),
+        "file_path": str(path),
         "file_name": path.name,
         "time_added": dt.now(tz=tz.utc),
     }
     if path.suffix == ".fits":
-        values = extra_details_from_fits(path) | values
+        values = extract_details_from_fits(path) | values
+    elif path.suffix == ".asdf":
+        values = extract_details_from_asdf(path) | values
 
     # Add any hive partitions in the path
-    for directory in str(relative_path).split("/"):
+    for directory in str(path).split("/"):
         if "=" in directory:
             key, value = directory.split("=")
             values[key] = value

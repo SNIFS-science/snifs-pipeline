@@ -1,10 +1,10 @@
 import sqlite3
 from functools import lru_cache
+from pathlib import Path
 
 import polars as pl
 
 from pipeline.common.log import get_logger
-from pipeline.common.prefect_utils import pipeline_task
 from pipeline.resolver.common import FileStoreDataFrame, extract_file_details
 from pipeline.resolver.resolver import Resolver
 
@@ -26,10 +26,15 @@ def refresh_filestore(resolver: Resolver, refresh: bool = False) -> None:
             continue
         if file.suffix == ".md":
             continue
-        relative_path = file.relative_to(resolver.data_path)
-        detected_filepaths.append(str(relative_path))
-        if refresh or relative_path not in analysed_files:
-            dfs.append(extract_file_details(file, relative_path))
+        path = file.resolve()
+        detected_filepaths.append(str(path))
+        if refresh or path not in analysed_files:
+            dfs.append(extract_file_details(file))
+
+    to_remove = set()
+    for file in analysed_files:
+        if not Path(file).exists():
+            to_remove.add(str(file.resolve()))
 
     df = (
         pl.concat(dfs, how="diagonal_relaxed", rechunk=True)
@@ -37,6 +42,7 @@ def refresh_filestore(resolver: Resolver, refresh: bool = False) -> None:
         .unique(subset=["file_path"], keep="last", maintain_order=True)
         .filter(pl.col("file_path").is_in(detected_filepaths))
         .drop_nulls(subset=["type"])
+        .filter(~pl.col("file_path").is_in(to_remove))
         .pipe(FileStoreDataFrame)
     )
     logger.info(f"Writing filestore with shape {df.shape} to {resolver.file_store_path}")
@@ -83,7 +89,6 @@ def build_database(resolver: Resolver) -> None:
 
 
 @lru_cache
-@pipeline_task()
 def build_filestore(refresh: bool = False) -> Resolver:
     resolver = Resolver.create()
     refresh_filestore(resolver, refresh)

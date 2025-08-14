@@ -215,7 +215,7 @@ class Image(BaseModel):
 
         af = asdf.AsdfFile(
             {
-                "header": self.header.to_dict(),
+                "metadata": self.header.to_dict(),
                 "data": self.data.astype(np.float32) if coerce_to_float32 else self.data,
                 "variance": self.variance.astype(np.float32) if coerce_to_float32 else self.variance,
                 "lineage": [lineage.model_dump() for lineage in self.lineage],
@@ -234,7 +234,9 @@ class Image(BaseModel):
         with asdf.open(asdf_file) as af:
             data = af["data"]
             variance = af["variance"]
-            header = Headers.from_dict(af["header"])
+            data._make_array()
+            variance._make_array()
+            header = Headers.from_dict(af["metadata"])
             lineage = [Lineage(**lineage) for lineage in af["lineage"]]
 
-        return Image(data=data, header=header, variance=variance, lineage=lineage)
+        return Image(data=data._array, header=header, variance=variance._array, lineage=lineage)

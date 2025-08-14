@@ -1,0 +1,86 @@
+from datetime import datetime as dt
+from functools import cached_property
+from pathlib import Path
+
+import polars as pl
+from pydantic import BaseModel, Field, computed_field
+
+from pipeline.common.image import Image
+from pipeline.common.prefect_utils import pipeline_flow
+from pipeline.config.deployment import SnifsDeploymentConfig, registry
+from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
+from pipeline.resolver.common import FileStoreEntry, FileType, PipelineStage
+from pipeline.resolver.resolver import FlowConfig
+from pipeline.tasks.processing.calibration import calibrate_continuum, calibrate_wavelengths
+
+
+class ProcessRunConfig(FlowConfig):
+    run_id: str = Field(description="The ID of the run to process.", examples=["25_057_001"])
+    refresh_filestore: bool = Field(default=True)
+
+    @cached_property
+    def output_folder(self) -> Path:
+        return self.resolver.output_path / f"processed_runs/run_id={self.run_id}/output"
+
+    @cached_property
+    def public_folder(self) -> Path:
+        return self.resolver.public_path / f"processed_runs/run_id={self.run_id}/output"
+
+    @computed_field
+    @property
+    def output_file(self) -> Path:
+        return self.output_folder / f"{PipelineStage.PROCESSED.value}_runid={self.run_id}.asdf"
+
+    @computed_field
+    @property
+    def output_summary_file(self) -> Path:
+        return self.public_folder / f"{PipelineStage.PROCESSED.value}_summary.json"
+
+
+class ProcessRunSummary(BaseModel):
+    output_path: str
+    time_processed: dt | None = None
+    object: str | None = None
+    object_ra: str | None = None
+    object_dec: str | None = None
+    run_id: str | None = None
+    observation_id: str | None = None
+
+
+@registry.register(SnifsDeploymentConfig(max_walltime=10 * 60))
+@pipeline_flow()
+def process_run(conf: ProcessRunConfig) -> None:
+    conf.initialise_and_log()
+
+    # All exposures for the run should be processed
+    exposures = [
+        FileStoreEntry.model_validate(entry)
+        for entry in conf.resolver.file_store.filter(pl.col("run_id").eq(conf.run_id)).to_dicts()
+    ]
+    processed = [preprocess_exposure(PreprocessExposureConfig(primary_file=Path(exp.file_path))) for exp in exposures]
+
+    # We need to separate science exposures from others because they're the main focus
+    science_exposures = [p for p in processed if p.type == FileType.SCIENCE]
+
+    # TODO: This part should be done by the resolver, which means ensuring that output
+    # TODO: files from other flows are automatically added to the resolver on creation
+    for file_entry in science_exposures:
+        image = Image.from_asdf(file_entry.output_path)
+
+        continuums = [e for e in processed if e.type == FileType.CONTINUUM and e.channel == file_entry.channel]
+        assert len(continuums) == 1
+        continuum_image = Image.from_asdf(continuums[0].output_path)
+
+        arcs = [e for e in processed if e.type == FileType.ARC and e.channel == file_entry.channel]
+        assert len(arcs) == 1
+        arc_image = Image.from_asdf(arcs[0].output_path)
+
+        flat_fielded = calibrate_continuum(image, continuum_image)
+        wavelength_calibrated = calibrate_wavelengths(flat_fielded, arc_image)
+        wavelength_calibrated.to_asdf(config.output_file)
+
+
+if __name__ == "__main__":
+    raw_dir = Path(__file__).parents[2] / "data/raw"
+    config = ProcessRunConfig(run_id="25_056_084")
+    process_run(config)

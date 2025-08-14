@@ -60,7 +60,7 @@ class Resolver(BaseModel):
 
     def ensure_file_exists(self, file_path: Path) -> None:
         file_store = self.file_store
-        entry = extract_file_details(file_path, file_path.relative_to(self.data_path))
+        entry = extract_file_details(file_path)
 
         # Get a hash of the dataframe as it exists now
         current_hash = hash(tuple(file_store.drop("time_added").hash_rows().to_list()))
@@ -77,8 +77,8 @@ class Resolver(BaseModel):
 
         # If the hash has changed, we need to update the file store
         if current_hash != new_hash:
-            # Save the new file store
-            self.save_filestore(FileStoreDataFrame(new_file_store))
+            self.file_store = FileStoreDataFrame(new_file_store)
+            self.save_filestore(self.file_store)
 
     def save_filestore(self, df: FileStoreDataFrame) -> None:
         self.file_store_path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,11 +90,11 @@ class Resolver(BaseModel):
         """
         if self.file_store is None:
             raise FileNotFoundError(f"File store not found at {self.file_store_path}.")
-        relative_path = str(file_path.relative_to(self.data_path))
-        file_records = self.file_store.filter(pl.col("file_path").eq(relative_path))
+        path = str(file_path.resolve())
+        file_records = self.file_store.filter(pl.col("file_path").eq(path))
         if len(file_records) == 0:
-            raise FileNotFoundError(f"File {relative_path} not found in file store.")
-        assert len(file_records) == 1, f"Found multiple records for {relative_path}"
+            raise FileNotFoundError(f"File {path} not found in file store.")
+        assert len(file_records) == 1, f"Found multiple records for {path}"
         return FileStoreEntry.model_validate(file_records.to_dicts()[0])
 
     def get_full_path(self, file_path: Path) -> Path:

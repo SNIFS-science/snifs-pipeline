@@ -1,8 +1,10 @@
 import shutil
+from datetime import datetime as dt
+from datetime import timezone as tz
 from functools import cached_property
 from pathlib import Path
 
-from pydantic import Field, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
@@ -77,9 +79,21 @@ class PreprocessExposureConfig(FlowConfig):
         return self.public_folder / f"{PipelineStage.PREPROCESSED.value}_summary.json"
 
 
-@registry.register(SnifsDeploymentConfig(max_walltime=10 * 60, qos="debug"))
+class PreprocessSummary(BaseModel):
+    source_path: str
+    output_path: str
+    type: FileType
+    channel: str
+    time_observation: dt | None = None
+    time_processed: dt | None = None
+    object: str | None = None
+    run_id: str | None = None
+    observation_id: str | None = None
+
+
+@registry.register(SnifsDeploymentConfig(max_walltime=10 * 60))
 @pipeline_flow()
-def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
+def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     logger = get_logger()
     primary = conf.fetch_metadata(conf.primary_file)
     conf.initialise_and_log()
@@ -116,19 +130,27 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> Path:
         image = apply_custom_red_flat(image)
     # image = remove_cosmic_rays(image)
 
-    # TODO: need add_parangle.py from Daniel, along with the parangel.txt file to get the information from
-
-    # debug_comparison(image, primary.channel, primary.run_id, primary.type)
     conf.raw_file_duplication_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(conf.primary_file, conf.raw_file_duplication_path)
     image.to_asdf(conf.output_image_file)
-    # plot_bias_sections(primary, conf.public_folder)
-    # plot_detailed_images(primary, conf.public_folder)
+    conf.resolver.ensure_file_exists(conf.output_image_file)
+    plot_bias_sections(primary, conf.public_folder)
+    plot_detailed_images(primary, conf.public_folder)
 
     summary = summarise_image(image, primary, conf.output_summary_file, discriminator="preprocess_exposure")
     write_summary(conf.resolver, summary)
 
-    return conf.output_image_file
+    return PreprocessSummary(
+        source_path=str(conf.primary_file.resolve()),
+        output_path=str(conf.output_image_file.resolve()),
+        type=primary.type,
+        channel=primary.channel,
+        time_observation=primary.time_observation,
+        time_processed=dt.now(tz=tz.utc),
+        object=primary.object,
+        run_id=primary.run_id,
+        observation_id=primary.observation_id,
+    )
 
 
 if __name__ == "__main__":
