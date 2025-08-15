@@ -12,6 +12,6 @@ def find_dark_model_files(primary_file: FileStoreEntry | None, file_store: FileS
     assert primary_file is not None, "primary_file must be provided. There is no global suitable dark model file."
     # Try to match on the run_id
     files = file_store.filter(
-        (pl.col("type").eq(FileType.DARK_MODEL.value)) & (pl.col("channel").eq(primary_file.channel))
+        (pl.col("file_type").eq(FileType.DARK_MODEL.value)) & (pl.col("channel").eq(primary_file.channel))
     )
     return [FileStoreEntry.model_validate(row) for row in files.to_dicts()]

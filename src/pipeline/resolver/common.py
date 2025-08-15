@@ -10,7 +10,7 @@ from astropy.io import fits
 from pandera.engines.polars_engine import DateTime
 from pandera.polars import DataFrameModel, Field
 from pandera.typing.polars import DataFrame, Series
-from pydantic import BaseModel, BeforeValidator, ValidationInfo
+from pydantic import BaseModel, BeforeValidator, ValidationError, ValidationInfo
 
 from pipeline.common.log import get_logger
 
@@ -88,56 +88,54 @@ class FileType(StrEnum):
 
 
 class FileStoreModel(DataFrameModel):
+    level: Series[str] = Field()
     file_path: Series[str] = Field(unique=True)
     file_name: Series[str] = Field()
-    type: Series[FileType] = Field(coerce=True)
-    object: Series[str] = Field(nullable=True)
-    object_ra: Series[str] = Field(nullable=True)
-    object_dec: Series[str] = Field(nullable=True)
-    run_id: Series[str] = Field(nullable=True)
-    observation_id: Series[str] = Field(nullable=True)
+    file_type: Series[FileType] = Field(coerce=True)
+    object: Series[str] = Field(nullable=True, coerce=True)
+    object_ra: Series[str] = Field(nullable=True, coerce=True)
+    object_dec: Series[str] = Field(nullable=True, coerce=True)
+    run_id: Series[str] = Field(nullable=True, coerce=True)
+    observation_id: Series[str] = Field(nullable=True, coerce=True)
     time_added: Series[UTCDatetime] = Field(coerce=True)
     time_creation: Series[UTCDatetime] = Field(nullable=True, coerce=True)
     time_observation: Series[UTCDatetime] = Field(nullable=True, coerce=True)
-    exposure_seconds: Series[float] = Field(nullable=True)
-    dark_seconds: Series[float] = Field(nullable=True)
-    altitude: Series[float] = Field(nullable=True)
-    azimuth: Series[float] = Field(nullable=True)
-    cass_rotation_angle: Series[float] = Field(nullable=True)
-    filter: Series[str] = Field(nullable=True)
-    channel: Series[str] = Field(nullable=True)
-    detector: Series[str] = Field(nullable=True)
+    exposure_seconds: Series[float] = Field(nullable=True, coerce=True)
+    dark_seconds: Series[float] = Field(nullable=True, coerce=True)
+    altitude: Series[float] = Field(nullable=True, coerce=True)
+    azimuth: Series[float] = Field(nullable=True, coerce=True)
+    filter: Series[str] = Field(nullable=True, coerce=True)
+    channel: Series[str] = Field(nullable=True, coerce=True)
+    detector: Series[str] = Field(nullable=True, coerce=True)
 
 
 FileStoreDataFrame = DataFrame[FileStoreModel]
 
 
 class FileStoreEntry(BaseModel):
+    level: str
     file_path: str
     file_name: str
-    type: FileType
-    object: str | None
-    object_ra: str | None
-    object_dec: str | None
-    run_id: str | None
-    observation_id: str | None
-    num_extensions: int | None
-    num_data_extensions: int | None
+    file_type: FileType
     time_added: dt
-    time_creation: dt | None
-    time_observation: dt | None
-    exposure_seconds: float | None
-    dark_seconds: float | None
-    altitude: float | None
-    azimuth: float | None
-    cass_rotation_angle: float | None
-    filter: str | None
-    channel: str | None
-    detector: str | None
+    object: str | None = None
+    object_ra: str | None = None
+    object_dec: str | None = None
+    run_id: str | None = None
+    observation_id: str | None = None
+    time_creation: dt | None = None
+    time_observation: dt | None = None
+    exposure_seconds: float | None = None
+    dark_seconds: float | None = None
+    altitude: float | None = None
+    azimuth: float | None = None
+    filter: str | None = None
+    channel: str | None = None
+    detector: str | None = None
 
 
-HEADER_MAP = {
-    "type": "OBSTYPE",
+FITS_HEADER_MAP = {
+    "file_type": "OBSTYPE",
     "run_id": "RUNID",
     "observation_id": "OBSID",
     "time_added": "TIME_ADDED",
@@ -145,12 +143,15 @@ HEADER_MAP = {
     "time_observation": "DATE-OBS",
     "exposure_seconds": "EXPTIME",
     "dark_seconds": "DARKTIME",
-    "cass_rotation_angle": "ROTANGLE",
+    "time_on_seconds": "TIMEON",
+    "detector_temperature": "DETTEMP",
     "object_ra": "OBJRA",
     "object_dec": "OBJDEC",
+    "bias_frame": "BIASFRAM",
 }
 
 
+# TODO TODO TODO: use the above to rename header values on load Image.from_fits
 def extract_details_from_fits(path: Path) -> dict[str, str | int | float | dt]:
     values = {}
     with fits.open(path) as hdul:  # type: ignore
@@ -158,7 +159,7 @@ def extract_details_from_fits(path: Path) -> dict[str, str | int | float | dt]:
         header = hdul[0].header  # type: ignore
         # Extract relevant information from the header
         for column in FileStoreModel.to_schema().columns:
-            expected_column_name = HEADER_MAP.get(column, column)
+            expected_column_name = FITS_HEADER_MAP.get(column, column)
             if expected_column_name in header:
                 value = header[expected_column_name]
                 if isinstance(value, str):
@@ -170,8 +171,6 @@ def extract_details_from_fits(path: Path) -> dict[str, str | int | float | dt]:
                         value = dt.strptime(value, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=tz.utc)
                 values[column] = value
 
-        values["num_extensions"] = len(hdul)
-        values["num_data_extensions"] = len([x for x in hdul if x.data is not None])  # type: ignore
     return values
 
 
@@ -187,9 +186,8 @@ def extract_details_from_asdf(path: Path) -> dict[str, str | int | float | dt]:
         metadata = {k.lower(): v for k, v in af["metadata"].items()}
 
         for column in FileStoreModel.to_schema().columns:
-            expected_column_name = HEADER_MAP.get(column, column)
-            if expected_column_name in metadata:
-                value = metadata[expected_column_name]
+            if column in metadata:
+                value = metadata[column]
                 if isinstance(value, str):
                     value = value.strip()
                 if column.startswith("time"):
@@ -198,14 +196,10 @@ def extract_details_from_asdf(path: Path) -> dict[str, str | int | float | dt]:
                     elif isinstance(value, str):
                         value = dt.strptime(value, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=tz.utc)
                 values[column] = value
-
-        values["num_extensions"] = len(af.tree.keys()) - 2  # type: ignore
-        # As there will also be the extensions and the asdf_library, we subtract 2
-        values["num_data_extensions"] = len(af.search(type_="NDArrayType").paths)  # type: ignore
     return values
 
 
-def extract_file_details(path: Path) -> FileStoreDataFrame:
+def extract_file_details(path: Path) -> FileStoreDataFrame | None:  # noqa: C901
     path = path.resolve()
     values = {
         "file_path": str(path),
@@ -217,20 +211,41 @@ def extract_file_details(path: Path) -> FileStoreDataFrame:
     elif path.suffix == ".asdf":
         values = extract_details_from_asdf(path) | values
 
+    # Ensure all lowercase
+    values = {k.lower(): v for k, v in values.items()}
+
     # Add any hive partitions in the path
     for directory in str(path).split("/"):
         if "=" in directory:
             key, value = directory.split("=")
             values[key] = value
 
+    # Rename any "type" to "file_type" for now
+    if "type" in values:
+        values["file_type"] = values.pop("type")
+    if "obstype" in values:
+        values["file_type"] = values.pop("obstype")
+
+    # Remove "unknown" as a null value
+    for key in list(values.keys()):
+        if values[key] == "unknown" or values[key] == "":
+            del values[key]
+
     # There is some possibility to confuse high signal to noise continuum files
     # with low signal to noise raster readouts. In the existing quick_preprocess
     # scripts, this check is done by check to see if the file is less than 16MB in size
     # I'm not going to use 16MB because thats the rasters are <2MB and full flats
     # are 16-17MB anyway, so why the cutoff so close? I'll go for the midpoint of 8MB.
-    if values.get("TYPE") == FileType.CONTINUUM:
+    if values.get("file_type") == FileType.CONTINUUM:
         file_size_mb = path.stat().st_size / (1024 * 1024)
         if file_size_mb < 8:
-            values["type"] = FileType.RASTER
+            values["file_type"] = FileType.RASTER
+
+    try:
+        values = FileStoreEntry.model_validate(values).model_dump()
+    except ValidationError as e:
+        logger = get_logger()
+        logger.error(f"Validation error: {e} for path {path}, skipping")
+        return None
 
     return FileStoreDataFrame(values)

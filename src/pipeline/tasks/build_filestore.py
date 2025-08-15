@@ -19,29 +19,32 @@ def refresh_filestore(resolver: Resolver, refresh: bool = False) -> None:
     # If files are deleted, we want to reflect this as well.
     detected_filepaths = []
     logger.info(f"Starting to build the filestore at {resolver.file_store_path}")
-    all_files = list(resolver.data_path.rglob("*/**/*"))
+    all_files = list(resolver.data_path.rglob("**/*")) + list(resolver.output_path.rglob("**/*"))
+    all_files = [
+        a
+        for a in all_files
+        if not a.is_dir() and a.suffix in [".json", ".csv", ".fits", ".asdf", ".yml", ".yaml", ".logs.gz", ".parquet"]
+    ]
     logger.info(f"Found {len(all_files)} files in the data path {resolver.data_path}. Rebuilding the filestore.")
     for file in all_files:
-        if file.is_dir():
-            continue
-        if file.suffix == ".md":
-            continue
         path = file.resolve()
         detected_filepaths.append(str(path))
         if refresh or path not in analysed_files:
-            dfs.append(extract_file_details(file))
+            res = extract_file_details(file)
+            if res is not None:
+                dfs.append(res)
 
     to_remove = set()
     for file in analysed_files:
         if not Path(file).exists():
-            to_remove.add(str(file.resolve()))
+            to_remove.add(file)
 
     df = (
         pl.concat(dfs, how="diagonal_relaxed", rechunk=True)
         .sort("time_added")
         .unique(subset=["file_path"], keep="last", maintain_order=True)
         .filter(pl.col("file_path").is_in(detected_filepaths))
-        .drop_nulls(subset=["type"])
+        .drop_nulls(subset=["file_type"])
         .filter(~pl.col("file_path").is_in(to_remove))
         .pipe(FileStoreDataFrame)
     )

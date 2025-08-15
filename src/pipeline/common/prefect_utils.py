@@ -93,9 +93,9 @@ def pipeline_flow(**kwargs):
         #             # Note because flows can crash, we don't handle the post-execution
         #             # prometheus here
         #             if isinstance(result, State):
-        #                 FLOW_PROCESSING_TIME.labels(name, result.type.value).observe(elapsed)
+        #                 FLOW_PROCESSING_TIME.labels(name, result.file_type.value).observe(elapsed)
         #                 observed_time = True
-        #                 if result.type != StateType.COMPLETED:
+        #                 if result.file_type != StateType.COMPLETED:
         #                     span.set_status(StatusCode.OK)
         #                 else:
         #                     span.set_status(StatusCode.ERROR, description=result.message)

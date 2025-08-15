@@ -9,5 +9,5 @@ def find_raw_log_files(primary_file: FileStoreEntry | None, file_store: FileStor
     """
     Finds the raw logs file. Does not care about what the science file is right now.
     """
-    files = file_store.filter((pl.col("type").eq(FileType.RAW_LOGS.value)))
+    files = file_store.filter((pl.col("file_type").eq(FileType.RAW_LOGS.value)))
     return [FileStoreEntry.model_validate(row) for row in files.to_dicts()]

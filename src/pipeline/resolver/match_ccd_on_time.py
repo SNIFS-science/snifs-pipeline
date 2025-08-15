@@ -9,5 +9,5 @@ def find_ccd_on_time_files(primary_file: FileStoreEntry | None, file_store: File
     """
     Finds the CCD on time files. Does not care about what the science file is right now.
     """
-    files = file_store.filter((pl.col("type").eq(FileType.CCD_ON_TIMES.value)))
+    files = file_store.filter((pl.col("file_type").eq(FileType.CCD_ON_TIMES.value)))
     return [FileStoreEntry.model_validate(row) for row in files.to_dicts()]

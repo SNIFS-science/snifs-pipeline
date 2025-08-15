@@ -29,21 +29,23 @@ st.subheader("Summaries")
 
 st.plotly_chart(plot_summary(summaries))
 
-if selected_discriminator is None or selected_discriminator == "preprocess_exposure":
-    st.subheader("Preprocess Exposure Breakdown")
-    cols_to_plot = (
-        summaries.filter(pl.col("discriminator") == "preprocess_exposure")
-        .select(cs.ends_with("_num") & ~cs.contains("time"))
-        .columns
-    )
+for discriminator in summaries["discriminator"].unique():
+    if selected_discriminator is not None and discriminator != selected_discriminator:
+        continue
+
+    df_subset = summaries.filter(pl.col("discriminator") == discriminator)
+    st.subheader(discriminator.replace("_", " ").title())
+    cols_to_plot = df_subset.select(cs.ends_with("_num") & ~cs.contains("time")).columns
     # Remove columns which have only one unique value
-    cols_to_plot = [col for col in cols_to_plot if summaries[col].n_unique() > 1]
+    cols_to_plot = [col for col in cols_to_plot if df_subset[col].n_unique() > 1]
     cols = cycle(st.columns(3))
-    colour_palette = colour_palette.colour_cycler()
+    palette = colour_palette.colour_cycler()
 
     for column_name in cols_to_plot:
         col = next(cols)
-        colour = next(colour_palette)
+        colour = next(palette)
         with col:
             st.markdown(f"### {column_name.replace('_num', '').replace('_', ' ').title()}")
-            st.plotly_chart(plot_preprocess(summaries, y_col=column_name, colour=colour))
+            st.plotly_chart(
+                plot_preprocess(df_subset, y_col=column_name, colour=colour), key=f"{discriminator}_{column_name}"
+            )

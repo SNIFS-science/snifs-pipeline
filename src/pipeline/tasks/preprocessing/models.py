@@ -91,7 +91,7 @@ def subtract_dark(
     return subtract_dark_model(image, dark_model)
 
 
-@flag_skip("BIASDONE")
+@flag_skip("bias_done")
 @plot()
 @pipeline_task()
 @plot_standalone("subtract_bias")
@@ -105,8 +105,8 @@ def subtract_bias(image: Image, reference: Image | DarkModel) -> Image:
 
 def subtract_bias_model(image: Image, model: DarkModel) -> Image:
     """Subtracts bias model following imagesnifs.cxx:298"""
-    detector_temp = image.header.get_float("DETTEMP")
-    time_on_str = image.header.get_optional_str("TIMEON")
+    detector_temp = image.header.get_float("detector_temperature")
+    time_on_str = image.header.get_optional_str("time_on_seconds")
     time_on = float(time_on_str) if time_on_str is not None and "." in time_on_str else None
 
     original = image.data
@@ -116,32 +116,35 @@ def subtract_bias_model(image: Image, model: DarkModel) -> Image:
         image.data[s.x_min : s.x_max, s.y_min : s.y_max] -= to_remove
 
     mean_difference = np.mean(image.data - original)
+    image.header.set("bias_done", True)
     image.add_function_lineage(f"Subtracted bias model with {detector_temp=}, {time_on=}, and {mean_difference=:.4f}")
     return image
 
 
 def subtract_bias_image(image: Image, bias_image: Image) -> Image:
-    assert bias_image.header.get_bool("BIASFRAM"), "Bias image must have BIASFRAM set to True"
+    assert bias_image.header.get_bool("bias_frame"), "Bias image must have bias_frame set to True"
     new_image = image.subtract(bias_image)
     mean_difference = np.mean(new_image.data - image.data)
     new_image.add_function_lineage(f"Subtracted bias image with {mean_difference=:.4f} mean difference")
+    new_image.header.set("bias_done", True)
     return new_image
 
 
-@flag_skip("DARKDONE")
+@flag_skip("dark_done")
 @plot()
 @pipeline_task()
 @plot_standalone("subtract_dark_model")
 def subtract_dark_model(image: Image, model: DarkModel) -> Image:
-    detector_temp = image.header.get_float("DETTEMP")
-    time_on_str = image.header.get_optional_str("TIMEON")
+    detector_temp = image.header.get_float("detector_temperature")
+    time_on_str = image.header.get_optional_str("time_on_seconds")
     time_on = float(time_on_str) if time_on_str is not None and "." in time_on_str else None
-    dark_time = image.header.get_float("DARKTIME")
+    dark_time = image.header.get_float("dark_seconds")
 
     # This warning comes from imagesnifs.cxx:410
     if time_on is not None and time_on < dark_time:
         get_logger().warning(
-            f"TIMEON {time_on} is less than DARKTIME {dark_time}. This may lead to incorrect dark subtraction."
+            f"time_on_seconds {time_on} is less than dark_seconds"
+            f" {dark_time}. This may lead to incorrect dark subtraction."
         )
 
     original = image.data
@@ -153,10 +156,11 @@ def subtract_dark_model(image: Image, model: DarkModel) -> Image:
     image.add_function_lineage(
         f"Subtracted dark model with {detector_temp=}, {time_on=}, {dark_time=}, and {mean_difference=:.4f}"
     )
+    image.header.set("dark_done", True)
     return image
 
 
-@flag_skip("DARKDONE")
+@flag_skip("dark_done")
 @plot()
 @pipeline_task()
 @plot_standalone("subtract_dark_stack")
@@ -170,12 +174,12 @@ def subtract_dark_stack(image: Image, dark_images: list[Image], model: DarkModel
     section = model.sections[0]
 
     logger = get_logger()
-    if not image.header.get_bool("OVSCDONE"):
-        logger.warning("Image does not have OVSCDONE set, dark subtraction may not be correct.")
+    if not image.header.get_bool("overscan_done"):
+        logger.warning("Image does not have overscan_done set, dark subtraction may not be correct.")
 
-    dark_time = image.header.get_float("DARKTIME")
-    time_on = image.header.get_float("TIMEON")
-    temperature = image.header.get_float("DETTEMP")
+    dark_time = image.header.get_float("dark_seconds")
+    time_on = image.header.get_float("time_on_seconds")
+    temperature = image.header.get_float("detector_temperature")
 
     coefficients = [
         section.i0 * dark_time,
@@ -191,4 +195,5 @@ def subtract_dark_stack(image: Image, dark_images: list[Image], model: DarkModel
     image.add_function_lineage(
         f"Subtracted dark stack with {temperature=}, {time_on=}, {dark_time=}, and {mean_difference=:.4f}"
     )
+    image.header.set("dark_done", True)
     return image

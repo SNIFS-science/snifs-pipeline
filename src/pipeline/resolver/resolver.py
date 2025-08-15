@@ -41,7 +41,7 @@ class Resolver(BaseModel):
 
     @cached_property
     def processed_data_path(self) -> Path:
-        return self.data_path / "processed"
+        return self.output_path / "level=processed"
 
     @classmethod
     def create(cls, **kwargs) -> "Resolver":
@@ -53,14 +53,18 @@ class Resolver(BaseModel):
         }
         kwargs.update(kwargs)
         if "file_store_path" not in kwargs:
-            kwargs["file_store_path"] = kwargs["data_path"] / "filestore.parquet"
+            kwargs["file_store_path"] = kwargs["output_path"] / "filestore.parquet"
         if "database_path" not in kwargs:
-            kwargs["database_path"] = kwargs["data_path"] / "database.sqlite"
+            kwargs["database_path"] = kwargs["output_path"] / "database.sqlite"
         return cls(**kwargs)
 
-    def ensure_file_exists(self, file_path: Path) -> None:
+    def ensure_file_exists(self, file_path: Path | str) -> None:
+        if isinstance(file_path, str):
+            file_path = Path(file_path)
         file_store = self.file_store
         entry = extract_file_details(file_path)
+        if entry is None:
+            raise ValueError(f"Could not extract file details from {file_path}")
 
         # Get a hash of the dataframe as it exists now
         current_hash = hash(tuple(file_store.drop("time_added").hash_rows().to_list()))
@@ -73,7 +77,7 @@ class Resolver(BaseModel):
         )
 
         # Get a hash of the new dataframe
-        new_hash = hash(tuple(file_store.drop("time_added").hash_rows().to_list()))
+        new_hash = hash(tuple(new_file_store.drop("time_added").hash_rows().to_list()))
 
         # If the hash has changed, we need to update the file store
         if current_hash != new_hash:
@@ -84,10 +88,12 @@ class Resolver(BaseModel):
         self.file_store_path.parent.mkdir(parents=True, exist_ok=True)
         df.sort("file_path").write_parquet(self.file_store_path)
 
-    def get_file_metadata(self, file_path: Path) -> FileStoreEntry:
+    def get_file_metadata(self, file_path: Path | str) -> FileStoreEntry:
         """
         Get the metadata for a file.
         """
+        if isinstance(file_path, str):
+            file_path = Path(file_path)
         if self.file_store is None:
             raise FileNotFoundError(f"File store not found at {self.file_store_path}.")
         path = str(file_path.resolve())

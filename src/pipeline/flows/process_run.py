@@ -12,6 +12,7 @@ from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preproc
 from pipeline.resolver.common import FileStoreEntry, FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig
 from pipeline.tasks.processing.calibration import calibrate_continuum, calibrate_wavelengths
+from pipeline.tasks.summaries import summarise_image, write_summary
 
 
 class ProcessRunConfig(FlowConfig):
@@ -55,29 +56,42 @@ def process_run(conf: ProcessRunConfig) -> None:
     # All exposures for the run should be processed
     exposures = [
         FileStoreEntry.model_validate(entry)
-        for entry in conf.resolver.file_store.filter(pl.col("run_id").eq(conf.run_id)).to_dicts()
+        for entry in conf.resolver.file_store.filter(
+            pl.col("run_id").eq(conf.run_id) & pl.col("level").eq("raw")
+        ).to_dicts()
     ]
+
     processed = [preprocess_exposure(PreprocessExposureConfig(primary_file=Path(exp.file_path))) for exp in exposures]
+    for p in processed:
+        conf.resolver.ensure_file_exists(p.output_path)
 
     # We need to separate science exposures from others because they're the main focus
-    science_exposures = [p for p in processed if p.type == FileType.SCIENCE]
+    science_exposures = [p for p in processed if p.file_type == FileType.SCIENCE]
 
     # TODO: This part should be done by the resolver, which means ensuring that output
     # TODO: files from other flows are automatically added to the resolver on creation
     for file_entry in science_exposures:
         image = Image.from_asdf(file_entry.output_path)
 
-        continuums = [e for e in processed if e.type == FileType.CONTINUUM and e.channel == file_entry.channel]
+        continuums = [e for e in processed if e.file_type == FileType.CONTINUUM and e.channel == file_entry.channel]
         assert len(continuums) == 1
         continuum_image = Image.from_asdf(continuums[0].output_path)
 
-        arcs = [e for e in processed if e.type == FileType.ARC and e.channel == file_entry.channel]
+        arcs = [e for e in processed if e.file_type == FileType.ARC and e.channel == file_entry.channel]
         assert len(arcs) == 1
         arc_image = Image.from_asdf(arcs[0].output_path)
 
         flat_fielded = calibrate_continuum(image, continuum_image)
         wavelength_calibrated = calibrate_wavelengths(flat_fielded, arc_image)
         wavelength_calibrated.to_asdf(config.output_file)
+        conf.resolver.ensure_file_exists(config.output_file)
+        summary = summarise_image(
+            image,
+            conf.resolver.get_file_metadata(file_entry.output_path),
+            conf.output_summary_file,
+            discriminator="process_exposure",
+        )
+        write_summary(conf.resolver, summary)
 
 
 if __name__ == "__main__":

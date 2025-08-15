@@ -4,6 +4,7 @@ import numpy as np
 from astropy.io.fits import Header
 
 from pipeline.common.log import get_logger
+from pipeline.resolver.common import FITS_HEADER_MAP
 
 VALID_TYPES = TypeVar("VALID_TYPES", str, bool, int, float, list[str], list[int], list[float])
 
@@ -16,13 +17,13 @@ class Headers:
             self._metrics = set(self._headers["_METRICS"])
 
     def __getitem__(self, key: str) -> VALID_TYPES:
-        return self._headers[key]  # type: ignore
+        return self._headers[key.lower()]  # type: ignore
 
     def __setitem__(self, key: str, value: VALID_TYPES) -> None:
-        self._headers[key] = value
+        self._headers[key.lower()] = value
 
     def __contains__(self, key: str) -> bool:
-        return key in self._headers
+        return key.lower() in self._headers
 
     def __len__(self) -> int:
         return len(self._headers)
@@ -33,6 +34,7 @@ class Headers:
         return Headers.merge_all(self, other)
 
     def __delitem__(self, name: str) -> None:
+        name = name.lower()
         if name in self._headers:
             del self._headers[name]
         else:
@@ -47,13 +49,14 @@ class Headers:
         """
         Set a header key to a value.
         """
+        key = key.lower()
         self[key] = value
         if metric:
             self._metrics.add(key)
         self._headers["_METRICS"] = list(self._metrics)
 
     def get(self, key: str, default: Any = None) -> Any:
-        return self._headers.get(key, default)
+        return self._headers.get(key.lower(), default)
 
     def items(self):
         return self._headers.items()
@@ -216,5 +219,9 @@ class Headers:
         return Headers(**data)
 
     @classmethod
-    def from_astropy_header(cls, header: Header) -> "Headers":
-        return Headers(**{k: v for k, v in sorted(header.items()) if v is not None})
+    def from_astropy_header(cls, header: Header, sanities_keys: bool = True) -> "Headers":
+        raw = {k: v for k, v in sorted(header.items()) if v is not None}
+        if sanities_keys:
+            reverse_map = {v: k for k, v in FITS_HEADER_MAP.items()}
+            raw = {reverse_map.get(k, k).lower(): v for k, v in raw.items()}  # type: ignore
+        return Headers(**raw)

@@ -9,5 +9,5 @@ def find_weather_files(primary_file: FileStoreEntry | None, file_store: FileStor
     """
     Finds the weather file. Does not care about what the science file is right now.
     """
-    files = file_store.filter((pl.col("type").eq(FileType.WEATHER.value)))
+    files = file_store.filter((pl.col("file_type").eq(FileType.WEATHER.value)))
     return [FileStoreEntry.model_validate(row) for row in files.to_dicts()]

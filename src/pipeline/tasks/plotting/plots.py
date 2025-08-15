@@ -62,16 +62,16 @@ def determine_figure_prefix(primary: FileStoreEntry) -> str:
     """Determine the figure title based on the primary file's metadata."""
     run_id = primary.run_id or "unknown"
     channel = primary.channel or "unknown"
-    obstype = primary.type.value or "unknown"
-    return f"{obstype=} - {run_id=} - {channel=}"
+    file_type = primary.file_type.value or "unknown"
+    return f"{file_type=} - {run_id=} - {channel=}"
 
 
 def determine_figure_prefix_from_header(image: Image) -> str:
     """Determine the figure title based on the primary file's metadata."""
-    run_id = image.header.get_optional_str("RUNID", "unknown")
+    run_id = image.header.get_optional_str("run_id", "unknown")
     channel = image.header.get_optional_str("CHANNEL", "unknown")
-    obstype = image.header.get_optional_str("OBSTYPE", "unknown")
-    return f"{obstype=} - {run_id=} - {channel=}"
+    file_type = image.header.get_optional_str("file_type", "unknown")
+    return f"{file_type=} - {run_id=} - {channel=}"
 
 
 def ensure_list[T](x: T | list[T] | tuple[T]) -> list[T]:

@@ -106,13 +106,13 @@ def standardise_b_images(images: list[Image], primary_headers: Headers) -> list[
         image.header["CCDNUM"] = i
         image.header["GAIN"] = GAINS["B"][i]
         image.header["CCDNAMP"] = 1
-        image.header["SATURATE"] = image.header.get_int("CCD{i}SAT", 65535)
-        if "RUNID" not in image.header and "RUNID" in primary_headers:
-            image.header["RUNID"] = primary_headers.get_str("RUNID")
-        if "OBSTYPE" not in image.header and "OBSTYPE" in primary_headers:
-            image.header["OBSTYPE"] = primary_headers.get_str("OBSTYPE")
-        if "CHANNEL" not in image.header and "CHANNEL" in primary_headers:
-            image.header["CHANNEL"] = primary_headers.get_str("CHANNEL")
+        image.header["saturate"] = image.header.get_int("ccd{i}sat", 65535)
+        if "run_id" not in image.header and "run_id" in primary_headers:
+            image.header["run_id"] = primary_headers.get_str("run_id")
+        if "file_type" not in image.header and "file_type" in primary_headers:
+            image.header["file_type"] = primary_headers.get_str("file_type")
+        if "channel" not in image.header and "channel" in primary_headers:
+            image.header["channel"] = primary_headers.get_str("channel")
 
         # As per algocams.cxx:125, detcom images drop the first 11 columns of overscan!
         # The fact this is twelve below is because this is 1-indexed
@@ -164,7 +164,7 @@ def standardise_r_images(images: list[Image], primary_headers: Headers) -> list[
             "CCDBIN": image.header[f"CCDBIN{i + 1}"],
             "SATURATE": image.header.get_int(f"CCD{i}SAT", 65535),
             "CCDTEMP": image.header.get_optional_float(
-                "CCDTMP", image.header.get_optional_float("DETTEMP", default=None)
+                "CCDTMP", image.header.get_optional_float("detector_temperature", default=None)
             ),
             "CCDNUM": i,
         }
@@ -172,12 +172,12 @@ def standardise_r_images(images: list[Image], primary_headers: Headers) -> list[
         image.add_function_lineage(
             "Standardise R channel image, including 10 pixel trim on BIASSEC and flipping pixel direction"
         )
-        if "RUNID" not in image.header and "RUNID" in primary_headers:
-            image.header["RUNID"] = primary_headers.get_str("RUNID")
-        if "OBSTYPE" not in image.header and "OBSTYPE" in primary_headers:
-            image.header["OBSTYPE"] = primary_headers.get_str("OBSTYPE")
-        if "CHANNEL" not in image.header and "CHANNEL" in primary_headers:
-            image.header["CHANNEL"] = primary_headers.get_str("CHANNEL")
+        if "run_id" not in image.header and "run_id" in primary_headers:
+            image.header["run_id"] = primary_headers.get_str("run_id")
+        if "file_type" not in image.header and "file_type" in primary_headers:
+            image.header["file_type"] = primary_headers.get_str("file_type")
+        if "channel" not in image.header and "channel" in primary_headers:
+            image.header["channel"] = primary_headers.get_str("channel")
         new_images.append(image)
 
     return new_images

@@ -75,7 +75,7 @@ def add_overscan_variance(image: Image) -> Image:
 @pipeline_task()
 @plot_standalone("subtract_offset")
 @listify
-@flag_skip("OVSCDONE")
+@flag_skip("overscan_done")
 def subtract_offset(image: Image) -> Image:
     image = image.copy()
     # ComputeLinesMean from overscan.cxx:202 iterates over every Y value
@@ -118,8 +118,8 @@ def subtract_offset(image: Image) -> Image:
 
     # There are some header value shenanigans in overscan.cxx:585 that I replicate
     # with minimal understanding.
-    if image.header.get_optional_str("OBSTYPE") != "BIAS":  #! TODO: this negation confuses me
-        image.header["BIASFRAM"] = 1
+    if image.header.get_optional_str("file_type") != "BIAS":  #! TODO: this negation confuses me
+        image.header["bias_frame"] = 1
 
     # Save out the median medians to the header for posterity
     overscan_median = float(np.median(offset_centre))
@@ -127,6 +127,7 @@ def subtract_offset(image: Image) -> Image:
     # ^ Don't ask me why it also compares to double the first difference.
     image.header.set("overscan_median", overscan_median, metric=True)
     image.header.set("overscan_max", max_overscan, metric=True)
+    image.header.set("overscan_done", True)
     image.add_function_lineage(f"Applied overscan correction: median={overscan_median:0.4f}, max={max_overscan:0.4f}")
 
     return image

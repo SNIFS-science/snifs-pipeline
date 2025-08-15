@@ -1,4 +1,3 @@
-import shutil
 from datetime import datetime as dt
 from datetime import timezone as tz
 from functools import cached_property
@@ -52,7 +51,7 @@ class PreprocessExposureConfig(FlowConfig):
 
         return (
             self.resolver.output_path
-            / f"processed_runs/run_id={primary.run_id}/obstype={primary.type}/channel={primary.channel}"
+            / f"processed_runs/run_id={primary.run_id}/filetype={primary.file_type}/channel={primary.channel}"
         )
 
     @cached_property
@@ -60,13 +59,8 @@ class PreprocessExposureConfig(FlowConfig):
         primary = self.fetch_metadata(self.primary_file)
         return (
             self.resolver.public_path
-            / f"processed_runs/run_id={primary.run_id}/obstype={primary.type}/channel={primary.channel}"
+            / f"processed_runs/run_id={primary.run_id}/filetype={primary.file_type}/channel={primary.channel}"
         )
-
-    @property
-    def raw_file_duplication_path(self) -> Path:
-        """This is the path where the raw file will be duplicated to, for posterity."""
-        return self.output_folder / f"{PipelineStage.RAW.value}.fits"
 
     @computed_field
     @property
@@ -82,7 +76,7 @@ class PreprocessExposureConfig(FlowConfig):
 class PreprocessSummary(BaseModel):
     source_path: str
     output_path: str
-    type: FileType
+    file_type: FileType
     channel: str
     time_observation: dt | None = None
     time_processed: dt | None = None
@@ -109,8 +103,8 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     images = load_images_from_file(conf.primary_file, transpose=True)
     primary_headers = load_headers(conf.primary_file)
 
-    if "TIMEON" not in primary_headers:
-        primary_headers["TIMEON"] = determine_timeon(conf.ccd_on_time_file, primary_headers)
+    if "time_on_seconds" not in primary_headers:
+        primary_headers["time_on_seconds"] = determine_timeon(conf.ccd_on_time_file, primary_headers)
     images = split_and_standardise(images, primary.channel, primary_headers)
     images = handle_saturation(images)
     if len(images) == 2:  # Binary offset model is only derived for 2 chip models.
@@ -130,8 +124,7 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
         image = apply_custom_red_flat(image)
     # image = remove_cosmic_rays(image)
 
-    conf.raw_file_duplication_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(conf.primary_file, conf.raw_file_duplication_path)
+    image.header["level"] = "preprocess"
     image.to_asdf(conf.output_image_file)
     conf.resolver.ensure_file_exists(conf.output_image_file)
     plot_bias_sections(primary, conf.public_folder)
@@ -143,7 +136,7 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     return PreprocessSummary(
         source_path=str(conf.primary_file.resolve()),
         output_path=str(conf.output_image_file.resolve()),
-        type=primary.type,
+        file_type=primary.file_type,
         channel=primary.channel,
         time_observation=primary.time_observation,
         time_processed=dt.now(tz=tz.utc),
@@ -154,15 +147,16 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
 
 
 if __name__ == "__main__":
-    raw_dir = Path(__file__).parents[2] / "data/raw"
+    raw_dir = Path(__file__).parents[3] / "data/level=raw"
     files = [
         raw_dir / "runs/run_id=25_056_084/science_red.fits",
-        raw_dir / "runs/run_id=25_056_084/science_blue.fits",
-        raw_dir / "runs/run_id=25_057_001/continuum_red.fits",
-        raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",
-        raw_dir / "runs/run_id=25_121_118/bias_red.fits",
-        raw_dir / "runs/run_id=25_159_030/continuum_red.fits",
+        # raw_dir / "runs/run_id=25_056_084/science_blue.fits",
+        # raw_dir / "runs/run_id=25_057_001/continuum_red.fits",
+        # raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",
+        # raw_dir / "runs/run_id=25_121_118/bias_red.fits",
+        # raw_dir / "runs/run_id=25_159_030/continuum_red.fits",
     ]
     for file in files:
+        assert Path(file).exists(), f"File {file} does not exist."
         config = PreprocessExposureConfig(primary_file=file)
         preprocess_exposure(config)

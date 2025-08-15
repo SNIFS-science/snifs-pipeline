@@ -23,7 +23,7 @@ def extract_snifs_run_logs(resolver: Resolver):
                 channel, time_str = match.group(1), match.group(2)
                 results.append({"channel": channel, "time": dt.strptime(time_str, "%a %b %d %H:%M:%S %Z %Y")})
 
-        output_path = resolver.processed_data_path / f"type={FileType.CCD_ON_TIMES.value}" / "times.parquet"
+        output_path = resolver.processed_data_path / f"file_type={FileType.CCD_ON_TIMES.value}" / "times.parquet"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         df = pl.DataFrame(results).sort("time").with_columns(DATETIME_CONVERSION_EXPR)
         df.write_parquet(output_path, compression="gzip")

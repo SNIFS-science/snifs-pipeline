@@ -15,7 +15,7 @@ def find_highsn_continuum_files(
 
     # Try to match on the run_id
     files = file_store.filter(
-        (pl.col("type").eq(FileType.CONTINUUM.value))
+        (pl.col("file_type").eq(FileType.CONTINUUM.value))
         & (pl.col("run_id").eq(primary_file.run_id))
         & (pl.col("object").eq(primary_file.object))
         & (pl.col("channel").eq(primary_file.channel))

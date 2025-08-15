@@ -8,5 +8,7 @@ from pipeline.resolver.registry import file_match_registry
 def find_bias_image_files(primary_file: FileStoreEntry | None, file_store: FileStoreDataFrame) -> list[FileStoreEntry]:
     assert primary_file is not None, "primary_file must be provided. There is no global suitable bias image file."
     # Try to match on the run_id
-    files = file_store.filter((pl.col("type").eq(FileType.BIAS.value)) & (pl.col("channel").eq(primary_file.channel)))
+    files = file_store.filter(
+        (pl.col("file_type").eq(FileType.BIAS.value)) & (pl.col("channel").eq(primary_file.channel))
+    )
     return [FileStoreEntry.model_validate(row) for row in files.to_dicts()]

@@ -9,8 +9,8 @@ from pipeline.common import Headers, get_logger, pipeline_task
 
 @pipeline_task()
 def determine_timeon(timeon_file: Path, primary_headers: Headers) -> str:
-    channel = primary_headers.get_str("CHANNEL")
-    date_obs = dt.fromisoformat(primary_headers.get_str("DATE-OBS")).replace(tzinfo=tz.utc)
+    channel = primary_headers.get_str("channel")
+    date_obs = dt.fromisoformat(primary_headers.get_str("time_observation")).replace(tzinfo=tz.utc)
     """For historical reasons, this is a float in number of seconds since the detector was on... but as a string."""
     seconds_since_on = (
         pl.read_parquet(timeon_file)
@@ -24,7 +24,7 @@ def determine_timeon(timeon_file: Path, primary_headers: Headers) -> str:
         .to_list()[0]
     )
     get_logger().info(
-        f"Determined TIMEON value {seconds_since_on} seconds for channel {channel} "
+        f"Determined time_on_seconds value {seconds_since_on} seconds for channel {channel} "
         f"from file {timeon_file.name} at date {date_obs.isoformat()}"
     )
     # if seconds_since_on > 24 * 3600:
