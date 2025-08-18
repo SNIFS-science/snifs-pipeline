@@ -10,7 +10,7 @@ from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.config.deployment import SnifsDeploymentConfig, registry
 from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
 from pipeline.resolver.common import FileStoreEntry, FileType, PipelineStage
-from pipeline.resolver.resolver import FlowConfig
+from pipeline.resolver.resolver import FlowConfig, get_run_id
 from pipeline.tasks.processing.calibration import calibrate_continuum, calibrate_wavelengths
 from pipeline.tasks.summaries import summarise_image, write_summary
 
@@ -21,11 +21,11 @@ class ProcessRunConfig(FlowConfig):
 
     @cached_property
     def output_folder(self) -> Path:
-        return self.resolver.output_path / f"processed_runs/run_id={self.run_id}/output"
+        return self.resolver.output_path / f"level=processed/runs/run_id={self.run_id}/flow_run_id={get_run_id()}"
 
     @cached_property
     def public_folder(self) -> Path:
-        return self.resolver.public_path / f"processed_runs/run_id={self.run_id}/output"
+        return self.resolver.public_path / f"level=processed/runs/run_id={self.run_id}/flow_run_id={get_run_id()}"
 
     @computed_field
     @property

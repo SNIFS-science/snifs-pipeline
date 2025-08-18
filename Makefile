@@ -34,4 +34,4 @@ prefect:
 
 dashboard: export PYTHONPATH=src
 dashboard:
-	uv run streamlit run src/dashboard/app.py --server.port 8501
+	uv run streamlit run src/dashboard/Overview.py --server.port 8501

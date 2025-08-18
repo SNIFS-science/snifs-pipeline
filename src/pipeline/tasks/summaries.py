@@ -33,6 +33,7 @@ def summarise_image(
         "task_run_id": str(context.task_run.id),
         "api_url": str(context.client.api_url),
         "discriminator": discriminator,
+        "public_dir": str(output_location.parent),
     }
     if start_time is not None:
         content["task_start_time"] = start_time

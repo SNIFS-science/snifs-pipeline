@@ -26,18 +26,25 @@ class SyncDatabase:
                 query += f" WHERE discriminator = '{discriminator}'"
             return pl.read_database(query, conn)
 
-    def get_summary_datas(self, discriminator: str | None = None) -> pl.DataFrame:
+    def get_summary_datas(
+        self, discriminator: str | None = None, task_run_id: str | None = None, days: int | None = None
+    ) -> pl.DataFrame:
         """
         Get summary data for plotting.
         """
         with sqlite3.connect(self.db_url) as conn:
             query = """
-                SELECT flow_run_id, discriminator, created_at, key, value_str, value_num
+                SELECT flow_run_id, summaries.task_run_id, discriminator, created_at, key, value_str, value_num
                 FROM summaries
                 JOIN summary_info ON summaries.task_run_id = summary_info.task_run_id
+                WHERE 1=1
             """
             if discriminator:
-                query += f" WHERE discriminator = '{discriminator}'"
+                query += f" AND discriminator = '{discriminator}'"
+            if task_run_id:
+                query += f" AND summaries.task_run_id = '{task_run_id}'"
+            if days:
+                query += f" AND created_at >= DATE('now', '-{days} days')"
             df = pl.read_database(query, conn)
 
             def sanitise(col: str) -> str:
@@ -48,7 +55,9 @@ class SyncDatabase:
                 return col
 
             df_wide = df.pivot(
-                on="key", index=["flow_run_id", "discriminator", "created_at"], values=["value_str", "value_num"]
+                on="key",
+                index=["flow_run_id", "task_run_id", "discriminator", "created_at"],
+                values=["value_str", "value_num"],
             )
             df_wide = df_wide.rename({col: sanitise(col) for col in df_wide.columns})
             # Drop all null columns
@@ -56,9 +65,10 @@ class SyncDatabase:
             # Add a link column if we can
             if "api_url" in df_wide.columns and "flow_run_id" in df_wide.columns:
                 df_wide = df_wide.with_columns(
-                    link=pl.concat_str(
+                    prefect_link=pl.concat_str(
                         [pl.col("api_url").str.replace("/api/", ""), pl.col("flow_run_id")], separator="/runs/flow-run/"
-                    )
+                    ),
+                    detailed_link=pl.concat_str(pl.lit("/Details?task_run_id="), pl.col("task_run_id")),
                 )
             else:
                 df_wide = df_wide.with_columns(link=pl.lit(None))

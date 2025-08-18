@@ -9,7 +9,7 @@ from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.config.deployment import SnifsDeploymentConfig, registry
 from pipeline.resolver.common import FileType, PipelineStage
-from pipeline.resolver.resolver import FlowConfig
+from pipeline.resolver.resolver import FlowConfig, get_run_id
 from pipeline.tasks.loaders import clear_directory, load_headers, load_images_from_file
 from pipeline.tasks.plotting.plots import plot_bias_sections, plot_detailed_images  # noqa: F401
 from pipeline.tasks.preprocessing import (
@@ -50,16 +50,16 @@ class PreprocessExposureConfig(FlowConfig):
         primary = self.fetch_metadata(self.primary_file)
 
         return (
-            self.resolver.output_path
-            / f"processed_runs/run_id={primary.run_id}/filetype={primary.file_type}/channel={primary.channel}"
+            self.resolver.output_path / f"level=preprocessed/"
+            f"run_id={primary.run_id}/type={primary.file_type}/channel={primary.channel}/flow_run_id={get_run_id()}"
         )
 
     @cached_property
     def public_folder(self) -> Path:
         primary = self.fetch_metadata(self.primary_file)
         return (
-            self.resolver.public_path
-            / f"processed_runs/run_id={primary.run_id}/filetype={primary.file_type}/channel={primary.channel}"
+            self.resolver.public_path / f"level=preprocessed/"
+            f"run_id={primary.run_id}/type={primary.file_type}/channel={primary.channel}/flow_run_id={get_run_id()}"
         )
 
     @computed_field
@@ -127,8 +127,8 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     image.header["level"] = "preprocess"
     image.to_asdf(conf.output_image_file)
     conf.resolver.ensure_file_exists(conf.output_image_file)
-    plot_bias_sections(primary, conf.public_folder)
-    plot_detailed_images(primary, conf.public_folder)
+    # plot_bias_sections(primary, conf.public_folder)
+    # plot_detailed_images(primary, conf.public_folder)
 
     summary = summarise_image(image, primary, conf.output_summary_file, discriminator="preprocess_exposure")
     write_summary(conf.resolver, summary)

@@ -22,9 +22,11 @@ with st.sidebar:
         if selected_discriminator == "All":
             selected_discriminator = None
 
+        num_days_to_look_back = st.number_input("Number of days to look back", min_value=0, value=1)
+
         st.form_submit_button("Submit")
 
-summaries = db.get_summary_datas(selected_discriminator)
+summaries = db.get_summary_datas(selected_discriminator, days=num_days_to_look_back)
 st.subheader("Summaries")
 
 st.plotly_chart(plot_summary(summaries))

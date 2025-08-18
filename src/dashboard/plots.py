@@ -6,7 +6,7 @@ def plot_summary(df: pl.DataFrame) -> go.Figure:
     # The dataframe will have columns task_run_id, flow_run_id, discriminator, created_at, key, value_str, value_num
     fig = go.Figure()
     xs = df["created_at"].to_list()
-    links = df["link"].to_list()
+    links = df["detailed_link"].to_list()
     names = df["name"].to_list()
     texts = []
     for link, name in zip(links, names, strict=True):
@@ -54,7 +54,7 @@ def plot_preprocess(df: pl.DataFrame, y_col: str = "num_bad_pixels_num", colour:
     ys = df[y_col].to_list()
     texts = []
     for row in df.to_dicts():
-        texts.append(f"<a href='{row['link']}' target='_blank'>{row['name']}</a>")
+        texts.append(f"<a href='{row['detailed_link']}' target='_blank'>{row['name']}</a>")
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
