@@ -6,7 +6,7 @@ import streamlit as st
 
 from dashboard.colours import colour_palette
 from dashboard.database import SyncDatabase
-from dashboard.plots import plot_preprocess, plot_summary
+from dashboard.plots import PlotChoice, plot_preprocess, plot_summary
 from pipeline.resolver import Resolver
 
 resolver = Resolver.create()
@@ -23,6 +23,7 @@ with st.sidebar:
             selected_discriminator = None
 
         num_days_to_look_back = st.number_input("Number of days to look back", min_value=0, value=1)
+        plot_choice = st.selectbox("Plot Style", PlotChoice)
 
         st.form_submit_button("Submit")
 
@@ -49,5 +50,6 @@ for discriminator in summaries["discriminator"].unique():
         with col:
             st.markdown(f"### {column_name.replace('_num', '').replace('_', ' ').title()}")
             st.plotly_chart(
-                plot_preprocess(df_subset, y_col=column_name, colour=colour), key=f"{discriminator}_{column_name}"
+                plot_preprocess(df_subset, y_col=column_name, colour=colour, plot_choice=plot_choice),
+                key=f"{discriminator}_{column_name}",
             )

@@ -52,7 +52,7 @@ def create_page(task_run_id: str):
 
 st.set_page_config(
     page_title="Task Details",
-    page_icon="👋",
+    page_icon="🔍",
     layout="wide",
 )
 
