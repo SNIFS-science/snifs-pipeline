@@ -83,8 +83,8 @@ def process_run(conf: ProcessRunConfig) -> None:
 
         flat_fielded = calibrate_continuum(image, continuum_image)
         wavelength_calibrated = calibrate_wavelengths(flat_fielded, arc_image)
-        wavelength_calibrated.to_asdf(config.output_file)
-        conf.resolver.ensure_file_exists(config.output_file)
+        wavelength_calibrated.to_asdf(conf.output_file)
+        conf.resolver.ensure_file_exists(conf.output_file)
         summary = summarise_image(
             image,
             conf.resolver.get_file_metadata(file_entry.output_path),
