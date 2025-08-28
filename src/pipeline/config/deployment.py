@@ -65,7 +65,7 @@ class DeploymentConfig(BaseModel):
         }
 
 
-class SnifsDeploymentConfig(DeploymentConfig):
+class SnifsNerscDeploymentConfig(DeploymentConfig):
     project: str = Field(default="m112", description="Project name to use for the job for billing.")
     volumes: list[tuple[str, str, str]] = Field(
         default_factory=lambda: [

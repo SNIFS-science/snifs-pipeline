@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow
-from pipeline.config.deployment import SnifsDeploymentConfig, registry
+from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
 from pipeline.tasks.loaders import clear_directory, load_headers, load_images_from_file
@@ -85,7 +85,7 @@ class PreprocessSummary(BaseModel):
     observation_id: str | None = None
 
 
-@registry.register(SnifsDeploymentConfig(max_walltime=10 * 60))
+@registry.register(SnifsNerscDeploymentConfig(max_walltime=10 * 60))
 @pipeline_flow()
 def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     logger = get_logger()

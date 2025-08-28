@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.image import Image
 from pipeline.common.prefect_utils import pipeline_flow
-from pipeline.config.deployment import SnifsDeploymentConfig, registry
+from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
 from pipeline.resolver.common import FileStoreEntry, FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
@@ -52,7 +52,7 @@ class ProcessRunSummary(BaseModel):
     observation_id: str | None = None
 
 
-@registry.register(SnifsDeploymentConfig(max_walltime=30 * 60, memory=16 * 1024))
+@registry.register(SnifsNerscDeploymentConfig(max_walltime=30 * 60, memory=16 * 1024))
 @pipeline_flow()
 async def process_run(conf: ProcessRunConfig) -> None:
     conf.initialise_and_log()
