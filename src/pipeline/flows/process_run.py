@@ -113,6 +113,9 @@ async def process_run(conf: ProcessRunConfig) -> None:
 
 
 if __name__ == "__main__":
-    raw_dir = Path(__file__).parents[2] / "data/raw"
-    config = ProcessRunConfig(run_id="25_056_084")
-    process_run(config)
+
+    async def main() -> None:
+        config = ProcessRunConfig(run_id="25_056_084")
+        await process_run(config)
+
+    asyncio.run(main())
