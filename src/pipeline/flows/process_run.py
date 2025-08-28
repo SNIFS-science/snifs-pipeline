@@ -1,8 +1,11 @@
+import asyncio
 from datetime import datetime as dt
 from functools import cached_property
 from pathlib import Path
+from typing import Coroutine
 
 import polars as pl
+from prefect.deployments import run_deployment
 from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.image import Image
@@ -17,6 +20,7 @@ from pipeline.tasks.summaries import summarise_image, write_summary
 
 class ProcessRunConfig(FlowConfig):
     run_id: str = Field(description="The ID of the run to process.", examples=["25_057_001"])
+    inline_flows: bool = Field(default=True, description="Whether to run inline flows or give them to slurm")
     refresh_filestore: bool = Field(default=True)
 
     @cached_property
@@ -50,7 +54,7 @@ class ProcessRunSummary(BaseModel):
 
 @registry.register(SnifsDeploymentConfig(max_walltime=10 * 60, memory=16 * 1024))
 @pipeline_flow()
-def process_run(conf: ProcessRunConfig) -> None:
+async def process_run(conf: ProcessRunConfig) -> None:
     conf.initialise_and_log()
 
     # All exposures for the run should be processed
@@ -61,7 +65,21 @@ def process_run(conf: ProcessRunConfig) -> None:
         ).to_dicts()
     ]
 
-    processed = [preprocess_exposure(PreprocessExposureConfig(primary_file=Path(exp.file_path))) for exp in exposures]
+    if conf.inline_flows:
+        processed = [
+            preprocess_exposure(PreprocessExposureConfig(primary_file=Path(exp.file_path))) for exp in exposures
+        ]
+    else:
+        coros: list[Coroutine] = [
+            run_deployment(
+                "preprocess-exposure/preprocess-exposure",
+                flow_run_name=f"preprocess_{exp.file_path}",
+                parameters={"conf": {"primary_file": Path(exp.file_path)}},
+            )
+            for exp in exposures
+        ]  # type: ignore
+        await asyncio.gather(*coros)
+
     for p in processed:
         conf.resolver.ensure_file_exists(p.output_path)
 
