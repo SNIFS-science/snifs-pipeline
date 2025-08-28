@@ -71,7 +71,8 @@ async def process_run(conf: ProcessRunConfig) -> None:
     else:
         coros: list[Coroutine] = [
             run_deployment(
-                "preprocess-exposure/preprocess-exposure",
+                flow_name="preprocess-exposure",
+                deployment_name="preprocess-exposure",
                 flow_run_name=f"preprocess_{exp.file_path}",
                 parameters={"conf": {"primary_file": Path(exp.file_path)}},
                 poll_interval=60,
