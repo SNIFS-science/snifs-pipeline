@@ -1,8 +1,11 @@
+import asyncio
 from collections.abc import Callable
 from typing import ParamSpec, TypeVar
 
-from prefect import Flow, flow, task
+from prefect import Flow, flow, get_client, task
 from prefect.client.schemas.objects import FlowRun, State
+from prefect.deployments import run_deployment as prefect_run_deployment
+from prefect.exceptions import PrefectHTTPStatusError
 
 # from functools import wraps
 # import time
@@ -37,6 +40,37 @@ FLOW_DEFAULT_KWARGS = {
     "log_prints": False,
     "cache_result_in_memory": False,
 }
+
+
+async def run_deployment(
+    flow_name: str,
+    deployment_name: str,
+    flow_run_name: str | None = None,
+    parameters: dict | None = None,
+    timeout: int | None = None,
+    poll_interval: int = 60,
+) -> FlowRun:
+    flow_run = await prefect_run_deployment(
+        f"{flow_name}/{deployment_name}",
+        flow_run_name=flow_run_name,
+        parameters=parameters,
+        timeout=0,
+    )  # type: ignore
+
+    flow_run_id = flow_run.id
+    async with get_client() as client:
+        async with asyncio.timeout(timeout):
+            while True:
+                await asyncio.sleep(poll_interval)
+                try:
+                    flow_run = await client.read_flow_run(flow_run_id)
+                    flow_state = flow_run.state
+                    if flow_state and flow_state.is_final():
+                        return flow_run
+                except PrefectHTTPStatusError:
+                    pass
+
+    return flow_run
 
 
 def pipeline_task(**kwargs):

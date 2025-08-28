@@ -5,11 +5,10 @@ from pathlib import Path
 from typing import Coroutine
 
 import polars as pl
-from prefect.deployments import run_deployment
 from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.image import Image
-from pipeline.common.prefect_utils import pipeline_flow
+from pipeline.common.prefect_utils import pipeline_flow, run_deployment
 from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
 from pipeline.resolver.common import FileStoreEntry, FileType, PipelineStage
@@ -75,6 +74,7 @@ async def process_run(conf: ProcessRunConfig) -> None:
                 "preprocess-exposure/preprocess-exposure",
                 flow_run_name=f"preprocess_{exp.file_path}",
                 parameters={"conf": {"primary_file": Path(exp.file_path)}},
+                poll_interval=60,
             )
             for exp in exposures
         ]  # type: ignore
