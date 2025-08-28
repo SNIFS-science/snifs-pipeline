@@ -7,6 +7,7 @@ import polars as pl
 class SyncDatabase:
     def __init__(self, db_url: str | Path):
         self.db_url = Path(db_url) if isinstance(db_url, str) else db_url
+        assert self.db_url.exists(), f"Database file {self.db_url} does not exist."
 
     def get_discriminators(self) -> list[str]:
         """
