@@ -48,7 +48,7 @@ class ProcessRunSummary(BaseModel):
     observation_id: str | None = None
 
 
-@registry.register(SnifsDeploymentConfig(max_walltime=10 * 60))
+@registry.register(SnifsDeploymentConfig(max_walltime=10 * 60, memory=16 * 1024))
 @pipeline_flow()
 def process_run(conf: ProcessRunConfig) -> None:
     conf.initialise_and_log()

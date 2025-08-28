@@ -30,6 +30,7 @@ def refresh_filestore(resolver: Resolver, refresh: bool = False) -> None:
         path = file.resolve()
         detected_filepaths.append(str(path))
         if refresh or path not in analysed_files:
+            logger.info(f"Found new file: {path}")
             res = extract_file_details(file)
             if res is not None:
                 dfs.append(res)
