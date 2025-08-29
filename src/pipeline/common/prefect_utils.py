@@ -38,7 +38,7 @@ FLOW_DEFAULT_KWARGS = {
     # "on_completion": [on_finish],
     # "on_cancellation": [on_finish],
     "log_prints": False,
-    "cache_result_in_memory": False,
+    "cache_result_in_memory": True,
 }
 
 
