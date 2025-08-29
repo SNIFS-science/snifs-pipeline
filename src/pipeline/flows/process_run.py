@@ -61,7 +61,6 @@ async def process_run(conf: ProcessRunConfig) -> None:
             pl.col("run_id").eq(conf.run_id) & pl.col("level").eq("raw")
         ).to_dicts()
     ]
-    exposures = exposures[:1]
 
     if conf.inline_flows:
         processed = [
