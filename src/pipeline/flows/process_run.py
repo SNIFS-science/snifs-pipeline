@@ -7,12 +7,15 @@ from pathlib import Path
 import polars as pl
 from pydantic import BaseModel, Field, computed_field
 
+from pipeline.common.image import Image
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow, run_deployment
 from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, PreprocessSummary, preprocess_exposure
-from pipeline.resolver.common import FileStoreEntry, PipelineStage
+from pipeline.resolver.common import FileStoreEntry, FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
+from pipeline.tasks.processing.calibration import calibrate_continuum, calibrate_wavelengths
+from pipeline.tasks.summaries import summarise_image, write_summary
 
 
 class ProcessRunConfig(FlowConfig):
@@ -49,7 +52,7 @@ class ProcessRunSummary(BaseModel):
     observation_id: str | None = None
 
 
-@registry.register(SnifsNerscDeploymentConfig(max_walltime=120 * 60, memory=2 * 1952))
+@registry.register(SnifsNerscDeploymentConfig(max_walltime=120 * 60, memory=3 * 1952))
 @pipeline_flow()
 async def process_run(conf: ProcessRunConfig) -> None:
     conf.initialise_and_log()
@@ -86,32 +89,32 @@ async def process_run(conf: ProcessRunConfig) -> None:
         conf.resolver.ensure_file_exists(p.output_path)
 
     # We need to separate science exposures from others because they're the main focus
-    # science_exposures = [p for p in processed if p.file_type == FileType.SCIENCE]
+    science_exposures = [p for p in processed if p.file_type == FileType.SCIENCE]
 
     # # TODO: This part should be done by the resolver, which means ensuring that output
     # # TODO: files from other flows are automatically added to the resolver on creation
-    # for file_entry in science_exposures:
-    #     image = Image.from_asdf(file_entry.output_path)
+    for file_entry in science_exposures:
+        image = Image.from_asdf(file_entry.output_path)
 
-    #     continuums = [e for e in processed if e.file_type == FileType.CONTINUUM and e.channel == file_entry.channel]
-    #     assert len(continuums) == 1
-    #     continuum_image = Image.from_asdf(continuums[0].output_path)
+        continuums = [e for e in processed if e.file_type == FileType.CONTINUUM and e.channel == file_entry.channel]
+        assert len(continuums) == 1
+        continuum_image = Image.from_asdf(continuums[0].output_path)
 
-    #     arcs = [e for e in processed if e.file_type == FileType.ARC and e.channel == file_entry.channel]
-    #     assert len(arcs) == 1
-    #     arc_image = Image.from_asdf(arcs[0].output_path)
+        arcs = [e for e in processed if e.file_type == FileType.ARC and e.channel == file_entry.channel]
+        assert len(arcs) == 1
+        arc_image = Image.from_asdf(arcs[0].output_path)
 
-    #     flat_fielded = calibrate_continuum(image, continuum_image)
-    #     wavelength_calibrated = calibrate_wavelengths(flat_fielded, arc_image)
-    #     wavelength_calibrated.to_asdf(conf.output_file)
-    #     conf.resolver.ensure_file_exists(conf.output_file)
-    #     summary = summarise_image(
-    #         image,
-    #         conf.resolver.get_file_metadata(file_entry.output_path),
-    #         conf.output_summary_file,
-    #         discriminator="process_exposure",
-    #     )
-    #     write_summary(conf.resolver, summary)
+        flat_fielded = calibrate_continuum(image, continuum_image)
+        wavelength_calibrated = calibrate_wavelengths(flat_fielded, arc_image)
+        wavelength_calibrated.to_asdf(conf.output_file)
+        conf.resolver.ensure_file_exists(conf.output_file)
+        summary = summarise_image(
+            image,
+            conf.resolver.get_file_metadata(file_entry.output_path),
+            conf.output_summary_file,
+            discriminator="process_exposure",
+        )
+        write_summary(conf.resolver, summary)
 
 
 if __name__ == "__main__":
