@@ -82,7 +82,7 @@ async def process_run(conf: ProcessRunConfig) -> None:
         for run in flow_runs:
             logger.info(f"Flow run {run.name} ({run.id}) finished with state {run.state}")
             logger.info(f"Flow run {run.name} ({run.id}) finished with state result {run.state.result()}")
-        processed = [flow_run.state.result() for flow_run in flow_runs]  # type: ignore
+        processed = [await flow_run.state.result() for flow_run in flow_runs]  # type: ignore
 
     for p in processed:
         conf.resolver.ensure_file_exists(p.output_path)
