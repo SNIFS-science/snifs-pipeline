@@ -132,6 +132,7 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
 
     summary = summarise_image(image, primary, conf.output_summary_file, discriminator="preprocess_exposure")
     write_summary(conf.resolver, summary)
+    del image
 
     return PreprocessSummary(
         source_path=str(conf.primary_file.resolve()),
