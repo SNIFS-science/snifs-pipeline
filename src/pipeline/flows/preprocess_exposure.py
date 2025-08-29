@@ -3,6 +3,7 @@ from datetime import timezone as tz
 from functools import cached_property
 from pathlib import Path
 
+from prefect.artifacts import create_markdown_artifact
 from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.log import get_logger
@@ -134,7 +135,7 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     write_summary(conf.resolver, summary)
     del image
 
-    return PreprocessSummary(
+    result = PreprocessSummary(
         source_path=str(conf.primary_file.resolve()),
         output_path=str(conf.output_image_file.resolve()),
         file_type=primary.file_type,
@@ -145,6 +146,8 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
         run_id=primary.run_id,
         observation_id=primary.observation_id,
     )
+    create_markdown_artifact(f"""```{result.model_dump_json(indent=2)}```""", key="result")
+    return result
 
 
 if __name__ == "__main__":

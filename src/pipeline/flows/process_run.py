@@ -5,13 +5,12 @@ from functools import cached_property
 from pathlib import Path
 
 import polars as pl
-from prefect.client.schemas import FlowRun
 from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow, run_deployment
 from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
-from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
+from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, PreprocessSummary, preprocess_exposure
 from pipeline.resolver.common import FileStoreEntry, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
 
@@ -69,7 +68,7 @@ async def process_run(conf: ProcessRunConfig) -> None:
             preprocess_exposure(PreprocessExposureConfig(primary_file=Path(exp.file_path))) for exp in exposures
         ]
     else:
-        coros: list[Awaitable[FlowRun]] = [
+        coros: list[Awaitable[dict | None]] = [
             run_deployment(
                 flow_name="preprocess-exposure",
                 deployment_name="preprocess-exposure",
@@ -79,11 +78,10 @@ async def process_run(conf: ProcessRunConfig) -> None:
             )
             for exp in exposures
         ]  # type: ignore
-        flow_runs = await asyncio.gather(*coros)
-        for run in flow_runs:
-            logger.info(f"Flow run {run.name} ({run.id}) finished with state {run.state}")
-            logger.info(f"Flow run {run.name} ({run.id}) finished with state result {run.state.result()}")
-        processed = [await flow_run.state.result() for flow_run in flow_runs]  # type: ignore
+        artifacts = await asyncio.gather(*coros)
+        for artifact in artifacts:
+            logger.info(f"Got artifact: {artifact}")
+        processed = [PreprocessSummary.model_validate(artifact) for artifact in artifacts if artifact]  # type: ignore
 
     for p in processed:
         conf.resolver.ensure_file_exists(p.output_path)

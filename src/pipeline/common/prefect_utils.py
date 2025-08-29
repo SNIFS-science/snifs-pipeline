@@ -1,11 +1,16 @@
 import asyncio
+import json
 from collections.abc import Callable
 from typing import ParamSpec, TypeVar
+from uuid import UUID
 
 from prefect import Flow, flow, get_client, task
+from prefect.client.schemas.filters import ArtifactFilter, ArtifactFilterFlowRunId, ArtifactFilterKey
 from prefect.client.schemas.objects import FlowRun, State
 from prefect.deployments import run_deployment as prefect_run_deployment
 from prefect.exceptions import PrefectHTTPStatusError
+
+from pipeline.common.log import get_logger
 
 # from functools import wraps
 # import time
@@ -49,7 +54,7 @@ async def run_deployment(
     parameters: dict | None = None,
     timeout: int | None = None,
     poll_interval: int = 60,
-) -> FlowRun:
+) -> dict | None:
     flow_run = await prefect_run_deployment(
         f"{flow_name}/{deployment_name}",
         flow_run_name=flow_run_name,
@@ -57,7 +62,7 @@ async def run_deployment(
         timeout=0,
     )  # type: ignore
 
-    flow_run_id = flow_run.id
+    flow_run_id: UUID = flow_run.id
     async with get_client() as client:
         async with asyncio.timeout(timeout):
             while True:
@@ -66,11 +71,29 @@ async def run_deployment(
                     flow_run = await client.read_flow_run(flow_run_id)
                     flow_state = flow_run.state
                     if flow_state and flow_state.is_final():
-                        return flow_run
+                        # Check for the "result" keyed markdown artifact
+
+                        artifacts = await client.read_artifacts(
+                            artifact_filter=ArtifactFilter(
+                                flow_run_id=ArtifactFilterFlowRunId(any_=[flow_run_id]),
+                                key=ArtifactFilterKey(any_=["result"]),
+                            )
+                        )
+
+                        if not artifacts:
+                            raise ValueError(f"No result artifact found for flow run id {flow_run_id}")
+
+                        elif len(artifacts) > 1:
+                            raise ValueError(f"Multiple result artifacts found for flow run id {flow_run_id}")
+
+                        else:
+                            logger = get_logger()
+                            logger.info(f"Returning result artifact for flow run id {flow_run_id}")
+                            logger.info(f"Artifact data is: {artifacts[0].data}")
+                            return json.loads(str(artifacts[0].data).replace("```", ""))
                 except PrefectHTTPStatusError:
                     pass
-
-    return flow_run
+    return None
 
 
 def pipeline_task(**kwargs):
