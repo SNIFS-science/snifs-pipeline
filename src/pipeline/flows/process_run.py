@@ -1,13 +1,15 @@
 import asyncio
+from collections.abc import Awaitable
 from datetime import datetime as dt
 from functools import cached_property
 from pathlib import Path
-from typing import Coroutine
 
 import polars as pl
+from prefect.client.schemas import FlowRun
 from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.image import Image
+from pipeline.common.log import get_logger
 from pipeline.common.prefect_utils import pipeline_flow, run_deployment
 from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
@@ -51,11 +53,11 @@ class ProcessRunSummary(BaseModel):
     observation_id: str | None = None
 
 
-@registry.register(SnifsNerscDeploymentConfig(max_walltime=60 * 60, memory=12 * 1024))
+@registry.register(SnifsNerscDeploymentConfig(max_walltime=120 * 60, memory=12 * 1024))
 @pipeline_flow()
 async def process_run(conf: ProcessRunConfig) -> None:
     conf.initialise_and_log()
-
+    logger = get_logger()
     # All exposures for the run should be processed
     exposures = [
         FileStoreEntry.model_validate(entry)
@@ -69,7 +71,7 @@ async def process_run(conf: ProcessRunConfig) -> None:
             preprocess_exposure(PreprocessExposureConfig(primary_file=Path(exp.file_path))) for exp in exposures
         ]
     else:
-        coros: list[Coroutine] = [
+        coros: list[Awaitable[FlowRun]] = [
             run_deployment(
                 flow_name="preprocess-exposure",
                 deployment_name="preprocess-exposure",
@@ -79,7 +81,11 @@ async def process_run(conf: ProcessRunConfig) -> None:
             )
             for exp in exposures
         ]  # type: ignore
-        await asyncio.gather(*coros)
+        flow_runs = await asyncio.gather(*coros)
+        for run in flow_runs:
+            logger.info(f"Flow run {run.name} ({run.id}) finished with state {run.state}")
+            logger.info(f"Flow run {run.name} ({run.id}) finished with state result {run.state.result()}")
+        processed = [flow_run.state.result() for flow_run in flow_runs]  # type: ignore
 
     for p in processed:
         conf.resolver.ensure_file_exists(p.output_path)
