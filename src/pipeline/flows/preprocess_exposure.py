@@ -85,7 +85,7 @@ class PreprocessSummary(BaseModel):
     observation_id: str | None = None
 
 
-@registry.register(SnifsNerscDeploymentConfig(max_walltime=10 * 60, memory=6 * 1024))
+@registry.register(SnifsNerscDeploymentConfig(max_walltime=10 * 60, memory=8 * 1952))
 @pipeline_flow()
 def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     logger = get_logger()
