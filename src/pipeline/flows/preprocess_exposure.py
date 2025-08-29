@@ -146,7 +146,7 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
         run_id=primary.run_id,
         observation_id=primary.observation_id,
     )
-    create_markdown_artifact(f"""```\n{result.model_dump_json(indent=2)}\n```""", key="result")
+    create_markdown_artifact(f"""```json\n{result.model_dump_json(indent=2)}\n```""", key="result")
     return result
 
 

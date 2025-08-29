@@ -90,7 +90,9 @@ async def run_deployment(
                             logger = get_logger()
                             logger.info(f"Returning result artifact for flow run id {flow_run_id}")
                             logger.info(f"Artifact data is: {artifacts[0].data}")
-                            return json.loads(str(artifacts[0].data).replace("```", "").replace("\n", ""))
+                            return json.loads(
+                                str(artifacts[0].data).replace("```json", "").replace("```", "").replace("\n", "")
+                            )
                 except PrefectHTTPStatusError:
                     pass
     return None
