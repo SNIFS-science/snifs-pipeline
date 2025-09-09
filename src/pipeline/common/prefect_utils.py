@@ -72,7 +72,6 @@ async def run_deployment(
                     flow_state = flow_run.state
                     if flow_state and flow_state.is_final():
                         # Check for the "result" keyed markdown artifact
-
                         artifacts = await client.read_artifacts(
                             artifact_filter=ArtifactFilter(
                                 flow_run_id=ArtifactFilterFlowRunId(any_=[flow_run_id]),

@@ -1,0 +1,241 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    deployment.kubernetes.io/revision: '29'
+    field.cattle.io/publicEndpoints: >-
+      [{"addresses":["128.55.206.106"],"port":80,"protocol":"HTTP","serviceName":"prefect-pipelines:prefect","ingressName":"prefect-pipelines:prefect","hostname":"prefect.prefect-pipelines.production.svc.spin.nersc.org","path":"/","allNodes":true}]
+    nersc.gov/collab_uids: ''
+    nersc.gov/gid: '71654'
+    nersc.gov/gids: 4827,71654,4034,96414
+    nersc.gov/roles: user
+    nersc.gov/uid: '71654'
+    nersc.gov/username: samreay
+  creationTimestamp: '2025-08-08T05:42:28Z'
+  generation: 61
+  labels:
+    workload.user.cattle.io/workloadselector: apps.deployment-prefect-pipelines-prefect
+  managedFields:
+    - apiVersion: apps/v1
+      fieldsType: FieldsV1
+      fieldsV1:
+        f:metadata:
+          f:annotations:
+            f:field.cattle.io/publicEndpoints: {}
+          f:labels:
+            .: {}
+            f:workload.user.cattle.io/workloadselector: {}
+        f:spec:
+          f:progressDeadlineSeconds: {}
+          f:replicas: {}
+          f:revisionHistoryLimit: {}
+          f:selector: {}
+          f:strategy:
+            f:rollingUpdate:
+              .: {}
+              f:maxSurge: {}
+              f:maxUnavailable: {}
+            f:type: {}
+          f:template:
+            f:metadata:
+              f:labels:
+                .: {}
+                f:workload.user.cattle.io/workloadselector: {}
+              f:namespace: {}
+            f:spec:
+              f:containers:
+                k:{"name":"prefect"}:
+                  .: {}
+                  f:args: {}
+                  f:command: {}
+                  f:env:
+                    .: {}
+                    k:{"name":"PREFECT_API_DATABASE_CONNECTION_URL"}:
+                      .: {}
+                      f:name: {}
+                      f:value: {}
+                    k:{"name":"PREFECT_API_URL"}:
+                      .: {}
+                      f:name: {}
+                      f:value: {}
+                    k:{"name":"PREFECT_DEFAULT_WORK_POOL_NAME"}:
+                      .: {}
+                      f:name: {}
+                      f:value: {}
+                    k:{"name":"PREFECT_SERVER_API_HOST"}:
+                      .: {}
+                      f:name: {}
+                      f:value: {}
+                    k:{"name":"PREFECT_SERVER_API_PORT"}:
+                      .: {}
+                      f:name: {}
+                      f:value: {}
+                  f:image: {}
+                  f:imagePullPolicy: {}
+                  f:name: {}
+                  f:ports:
+                    .: {}
+                    k:{"containerPort":4200,"protocol":"TCP"}:
+                      .: {}
+                      f:containerPort: {}
+                      f:name: {}
+                      f:protocol: {}
+                  f:resources:
+                    .: {}
+                    f:requests:
+                      .: {}
+                      f:cpu: {}
+                      f:memory: {}
+                  f:securityContext:
+                    .: {}
+                    f:allowPrivilegeEscalation: {}
+                    f:capabilities:
+                      .: {}
+                      f:add: {}
+                      f:drop: {}
+                    f:privileged: {}
+                    f:readOnlyRootFilesystem: {}
+                    f:runAsNonRoot: {}
+                  f:terminationMessagePath: {}
+                  f:terminationMessagePolicy: {}
+              f:dnsPolicy: {}
+              f:restartPolicy: {}
+              f:schedulerName: {}
+              f:securityContext: {}
+              f:terminationGracePeriodSeconds: {}
+      manager: agent
+      operation: Update
+      time: '2025-09-08T18:03:05Z'
+    - apiVersion: apps/v1
+      fieldsType: FieldsV1
+      fieldsV1:
+        f:metadata:
+          f:annotations:
+            f:deployment.kubernetes.io/revision: {}
+        f:status:
+          f:availableReplicas: {}
+          f:conditions:
+            .: {}
+            k:{"type":"Available"}:
+              .: {}
+              f:lastTransitionTime: {}
+              f:lastUpdateTime: {}
+              f:message: {}
+              f:reason: {}
+              f:status: {}
+              f:type: {}
+            k:{"type":"Progressing"}:
+              .: {}
+              f:lastTransitionTime: {}
+              f:lastUpdateTime: {}
+              f:message: {}
+              f:reason: {}
+              f:status: {}
+              f:type: {}
+          f:observedGeneration: {}
+          f:readyReplicas: {}
+          f:replicas: {}
+          f:updatedReplicas: {}
+      manager: kube-controller-manager
+      operation: Update
+      subresource: status
+      time: '2025-09-08T18:03:12Z'
+  name: prefect
+  namespace: prefect-pipelines
+  resourceVersion: '1006720777'
+  uid: c6b598d9-8828-4bab-89ba-ae65bc12cd2f
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      workload.user.cattle.io/workloadselector: apps.deployment-prefect-pipelines-prefect
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        nersc.gov/collab_uids: ''
+        nersc.gov/gid: '71654'
+        nersc.gov/gids: 4827,71654,4034,96414
+        nersc.gov/roles: user
+        nersc.gov/uid: '71654'
+        nersc.gov/username: samreay
+      creationTimestamp: null
+      labels:
+        workload.user.cattle.io/workloadselector: apps.deployment-prefect-pipelines-prefect
+      namespace: prefect-pipelines
+    spec:
+      containers:
+        - args:
+            - '-c'
+            - prefect server start
+          command:
+            - /bin/bash
+          env:
+            - name: PREFECT_API_DATABASE_CONNECTION_URL
+              value: >-
+                postgresql+asyncpg://postgres:RTKtSAyBwfypqXAZBt35@postgres:5432/prefect
+            - name: PREFECT_DEFAULT_WORK_POOL_NAME
+              value: slurm
+            - name: PREFECT_SERVER_API_PORT
+              value: '4200'
+            - name: PREFECT_SERVER_API_HOST
+              value: 0.0.0.0
+            - name: PREFECT_API_URL
+              value: >-
+                http://prefect.prefect-pipelines.production.svc.spin.nersc.org/api
+          image: prefecthq/prefect:3-latest
+          imagePullPolicy: Always
+          name: prefect
+          ports:
+            - containerPort: 4200
+              name: prefect-api
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add:
+                - CHOWN
+                - SETUID
+                - DAC_OVERRIDE
+                - SETGID
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: false
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+status:
+  availableReplicas: 1
+  conditions:
+    - lastTransitionTime: '2025-08-11T02:37:48Z'
+      lastUpdateTime: '2025-08-11T02:51:57Z'
+      message: ReplicaSet "prefect-55c6b55f98" has successfully progressed.
+      reason: NewReplicaSetAvailable
+      status: 'True'
+      type: Progressing
+    - lastTransitionTime: '2025-08-25T23:34:19Z'
+      lastUpdateTime: '2025-08-25T23:34:19Z'
+      message: Deployment has minimum availability.
+      reason: MinimumReplicasAvailable
+      status: 'True'
+      type: Available
+  observedGeneration: 61
+  readyReplicas: 1
+  replicas: 1
+  updatedReplicas: 1

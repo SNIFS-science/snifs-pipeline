@@ -1,0 +1,271 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    deployment.kubernetes.io/revision: '23'
+    field.cattle.io/publicEndpoints: >-
+      [{"addresses":["128.55.206.106"],"port":80,"protocol":"HTTP","serviceName":"prefect-pipelines:dashboard","ingressName":"prefect-pipelines:streamlit","hostname":"streamlit.prefect-pipelines.production.svc.spin.nersc.org","path":"/","allNodes":true}]
+    nersc.gov/collab_uids: ''
+    nersc.gov/gid: '71654'
+    nersc.gov/gids: 5353,4861,4827,71654,4034,96414
+    nersc.gov/roles: user
+    nersc.gov/uid: '71654'
+    nersc.gov/username: samreay
+  creationTimestamp: '2025-08-11T03:56:49Z'
+  generation: 40
+  labels:
+    workload.user.cattle.io/workloadselector: apps.deployment-prefect-pipelines-dashboard
+  managedFields:
+    - apiVersion: apps/v1
+      fieldsType: FieldsV1
+      fieldsV1:
+        f:metadata:
+          f:annotations:
+            f:field.cattle.io/publicEndpoints: {}
+          f:labels:
+            .: {}
+            f:workload.user.cattle.io/workloadselector: {}
+        f:spec:
+          f:progressDeadlineSeconds: {}
+          f:replicas: {}
+          f:revisionHistoryLimit: {}
+          f:selector: {}
+          f:strategy:
+            f:rollingUpdate:
+              .: {}
+              f:maxSurge: {}
+              f:maxUnavailable: {}
+            f:type: {}
+          f:template:
+            f:metadata:
+              f:annotations:
+                f:cattle.io/timestamp: {}
+              f:labels:
+                .: {}
+                f:workload.user.cattle.io/workloadselector: {}
+              f:namespace: {}
+            f:spec:
+              f:containers:
+                k:{"name":"dashboard"}:
+                  .: {}
+                  f:args: {}
+                  f:command: {}
+                  f:env:
+                    .: {}
+                    k:{"name":"PYTHONPATH"}:
+                      .: {}
+                      f:name: {}
+                      f:value: {}
+                  f:image: {}
+                  f:imagePullPolicy: {}
+                  f:name: {}
+                  f:ports:
+                    .: {}
+                    k:{"containerPort":8501,"protocol":"TCP"}:
+                      .: {}
+                      f:containerPort: {}
+                      f:name: {}
+                      f:protocol: {}
+                  f:resources: {}
+                  f:securityContext:
+                    .: {}
+                    f:allowPrivilegeEscalation: {}
+                    f:capabilities:
+                      .: {}
+                      f:add: {}
+                      f:drop: {}
+                    f:privileged: {}
+                    f:readOnlyRootFilesystem: {}
+                    f:runAsNonRoot: {}
+                    f:runAsUser: {}
+                  f:terminationMessagePath: {}
+                  f:terminationMessagePolicy: {}
+                  f:volumeMounts:
+                    .: {}
+                    k:{"mountPath":"/data"}:
+                      .: {}
+                      f:mountPath: {}
+                      f:name: {}
+                    k:{"mountPath":"/output"}:
+                      .: {}
+                      f:mountPath: {}
+                      f:name: {}
+                    k:{"mountPath":"/public"}:
+                      .: {}
+                      f:mountPath: {}
+                      f:name: {}
+              f:dnsPolicy: {}
+              f:restartPolicy: {}
+              f:schedulerName: {}
+              f:securityContext:
+                .: {}
+                f:fsGroup: {}
+              f:terminationGracePeriodSeconds: {}
+              f:volumes:
+                .: {}
+                k:{"name":"vol-cfs-m112-data"}:
+                  .: {}
+                  f:hostPath:
+                    .: {}
+                    f:path: {}
+                    f:type: {}
+                  f:name: {}
+                k:{"name":"vol-cfs-m112-output"}:
+                  .: {}
+                  f:hostPath:
+                    .: {}
+                    f:path: {}
+                    f:type: {}
+                  f:name: {}
+                k:{"name":"vol-cfs-m112-public"}:
+                  .: {}
+                  f:hostPath:
+                    .: {}
+                    f:path: {}
+                    f:type: {}
+                  f:name: {}
+      manager: agent
+      operation: Update
+      time: '2025-09-08T18:03:08Z'
+    - apiVersion: apps/v1
+      fieldsType: FieldsV1
+      fieldsV1:
+        f:metadata:
+          f:annotations:
+            f:deployment.kubernetes.io/revision: {}
+        f:status:
+          f:availableReplicas: {}
+          f:conditions:
+            .: {}
+            k:{"type":"Available"}:
+              .: {}
+              f:lastTransitionTime: {}
+              f:lastUpdateTime: {}
+              f:message: {}
+              f:reason: {}
+              f:status: {}
+              f:type: {}
+            k:{"type":"Progressing"}:
+              .: {}
+              f:lastTransitionTime: {}
+              f:lastUpdateTime: {}
+              f:message: {}
+              f:reason: {}
+              f:status: {}
+              f:type: {}
+          f:observedGeneration: {}
+          f:readyReplicas: {}
+          f:replicas: {}
+          f:updatedReplicas: {}
+      manager: kube-controller-manager
+      operation: Update
+      subresource: status
+      time: '2025-09-08T18:03:12Z'
+  name: dashboard
+  namespace: prefect-pipelines
+  resourceVersion: '1006720796'
+  uid: db3afb95-373c-4e55-8e74-2356c9d09614
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      workload.user.cattle.io/workloadselector: apps.deployment-prefect-pipelines-dashboard
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        cattle.io/timestamp: '2025-08-28T10:54:13Z'
+        nersc.gov/collab_uids: ''
+        nersc.gov/gid: '71654'
+        nersc.gov/gids: 5353,4861,4827,71654,4034,96414
+        nersc.gov/roles: user
+        nersc.gov/uid: '71654'
+        nersc.gov/username: samreay
+      creationTimestamp: null
+      labels:
+        workload.user.cattle.io/workloadselector: apps.deployment-prefect-pipelines-dashboard
+      namespace: prefect-pipelines
+    spec:
+      containers:
+        - args:
+            - '-c'
+            - streamlit run dashboard/Overview.py --server.port 8501
+          command:
+            - /bin/sh
+          env:
+            - name: PYTHONPATH
+              value: /src
+          image: ghcr.io/snifs-science/snifs-pipeline/image:latest
+          imagePullPolicy: Always
+          name: dashboard
+          ports:
+            - containerPort: 8501
+              name: streamlit
+              protocol: TCP
+          resources: {}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add:
+                - NET_BIND_SERVICE
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 71654
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /data
+              name: vol-cfs-m112-data
+            - mountPath: /output
+              name: vol-cfs-m112-output
+            - mountPath: /public
+              name: vol-cfs-m112-public
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 4827
+        runAsGroup: 4827
+        runAsUser: 71654
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - hostPath:
+            path: /global/cfs/cdirs/m112/snifs/data
+            type: Directory
+          name: vol-cfs-m112-data
+        - hostPath:
+            path: /global/cfs/cdirs/m112/snifs/output
+            type: Directory
+          name: vol-cfs-m112-output
+        - hostPath:
+            path: /global/cfs/cdirs/m112/www/snifs
+            type: Directory
+          name: vol-cfs-m112-public
+status:
+  availableReplicas: 1
+  conditions:
+    - lastTransitionTime: '2025-08-28T09:35:37Z'
+      lastUpdateTime: '2025-08-28T09:35:37Z'
+      message: Deployment has minimum availability.
+      reason: MinimumReplicasAvailable
+      status: 'True'
+      type: Available
+    - lastTransitionTime: '2025-08-11T04:03:48Z'
+      lastUpdateTime: '2025-08-28T11:05:39Z'
+      message: ReplicaSet "dashboard-5dddb58467" has successfully progressed.
+      reason: NewReplicaSetAvailable
+      status: 'True'
+      type: Progressing
+  observedGeneration: 40
+  readyReplicas: 1
+  replicas: 1
+  updatedReplicas: 1
