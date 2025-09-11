@@ -49,6 +49,8 @@ Specifically, adopting Prefect will help fulfill O1-4, E1-4, S1.
 
 For advanced filtering of flow runs, cross-flow run comparison, and displaying some of the more astro-specific debug artifacts, we can easily create a streamlit dashboard which could either utilise a separate database backing (including a simple SQLite database), and/or utilise Prefect's python API to retrieve logs, artifacts, flow runs, task runs, deployment configurations, etc.
 
+We do have the option of using a dedicated observability stack in addition, such as using Grafana cloud (Loki for logs, Tempo for telemetry, Prometheus/Mirmir for metrics, Alloy for connecting them, Grafana for the dashboards), but I think the extra complexity this would add would require some serious upsides to adopting more tools.
+
 ### Containerisation
 
 Docker is industry standard, but Podman/apptainer are still common in scientific computing (being a bit closer to bare metal). All of them are able to execute standard docker images.
@@ -64,3 +66,25 @@ Static type checkers are still in active development and enforcing one over anot
 
 ## Runthrough
 
+[Streamlit](http://streamlit.prefect-pipelines.production.svc.spin.nersc.org/) and [Prefect](http://prefect.prefect-pipelines.production.svc.spin.nersc.org/dashboard) overview for an end user.
+
+![](docs/videos/streamlit.mp4)
+
+
+How to add Prefect to tasks and functions for a developer:
+
+![](docs/videos/prefect.mp4)
+
+
+Data lineage:
+
+![](docs/videos/lineage.mp4)
+
+
+
+
+## Spin
+
+Please check the `spin` directory for the yaml workloads downloaded from Spin. Those should allow services to be set up quickly (sorry for not having the full helm chart ready to go), and then the only step would be adding the secrets in.
+
+There's an outstanding TODO on how we want to add an authentication layer given Spin doesn't have something analogous to Cognito to stick in front. We could go with some shared logins via nginx if needed.
