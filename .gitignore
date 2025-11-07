@@ -52,7 +52,6 @@ dmypy.json
 profile_default/
 ipython_config.py
 __pypackages__/
-.python-version
 
 **/*.log
 **/*tmp*
