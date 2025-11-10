@@ -52,7 +52,7 @@ class PreprocessExposureConfig(FlowConfig):
 
         return (
             self.resolver.output_path / f"level=preprocessed/"
-            f"run_id={primary.run_id}/type={primary.file_type}/channel={primary.channel}/flow_run_id={get_run_id()}"
+            f"run_id={primary.run_id}/type={primary.file_type}/channel={primary.channel}/object={primary.object}/flow_run_id={get_run_id()}"
         )
 
     @cached_property
@@ -60,7 +60,7 @@ class PreprocessExposureConfig(FlowConfig):
         primary = self.fetch_metadata(self.primary_file)
         return (
             self.resolver.public_path / f"level=preprocessed/"
-            f"run_id={primary.run_id}/type={primary.file_type}/channel={primary.channel}/flow_run_id={get_run_id()}"
+            f"run_id={primary.run_id}/type={primary.file_type}/channel={primary.channel}/object={primary.object}/flow_run_id={get_run_id()}"
         )
 
     @computed_field
