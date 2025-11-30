@@ -127,6 +127,7 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
 
     image.header["level"] = "preprocess"
     image.to_asdf(conf.output_image_file)
+    image.to_fits(conf.output_image_file.with_suffix(".fits"))
     conf.resolver.ensure_file_exists(conf.output_image_file)
     # plot_bias_sections(primary, conf.public_folder)
     # plot_detailed_images(primary, conf.public_folder)
