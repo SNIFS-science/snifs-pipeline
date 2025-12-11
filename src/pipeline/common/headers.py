@@ -13,6 +13,7 @@ class Headers:
     def __init__(self, **kwargs):
         self._headers = kwargs
         self._metrics: set[str] = set()
+        self._original_order = list(kwargs.keys())
         if "_METRICS" in self._headers:
             self._metrics = set(self._headers["_METRICS"])
 
@@ -198,17 +199,30 @@ class Headers:
         """
         Convert the header to an Astropy Header.
         """
-        header = Header()
-        for key, value in self.items():
+
+        def add_value(header: Header, key: str, value: VALID_TYPES) -> None:
             # FITS headers cannot be lists. So we append 1,2,3, etc to the end of the key
-            # ALSO fits files cannot have keys longer than 8 characters, so we truncate the key if necessary
+            # ALSO fits files cannot have keys longer than 8 characters (at least for SNIFS when not using
+            # the e), so we truncate the key if necessary
             if isinstance(value, list | tuple | set):
+                if len(value) == 0:
+                    return
                 num_digits = int(np.ceil(np.log10(len(value))))
                 for i, v in enumerate(value):
                     key = f"{key[: 8 - num_digits]}{i:0{num_digits}d}"
                     header[key] = v
             else:
                 header[key[:8]] = value
+
+        header = Header()
+        for key in self._original_order:
+            value = self._headers[key]
+            add_value(header, key.upper(), value)
+
+        for key, value in self.items():
+            if key not in self._original_order:
+                add_value(header, key.upper(), value)
+
         return header
 
     @classmethod

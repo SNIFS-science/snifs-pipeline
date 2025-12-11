@@ -4,7 +4,6 @@ from datetime import datetime as dt
 from pathlib import Path
 
 import numpy as np
-from prefect.context import TaskRunContext, get_run_context
 
 from pipeline.common.image import Image
 from pipeline.common.log import get_logger
@@ -23,20 +22,30 @@ def summarise_image(
         num_bad_pixels = int(np.sum(~good_pixels, axis=None))
         image.header.set("NUM_BAD_PIXELS", num_bad_pixels, metric=True)
     output_location.parent.mkdir(parents=True, exist_ok=True)
-    context: TaskRunContext = get_run_context()  # type: ignore
-    start_time = context.task_run.start_time
+    prefect_context = {}
+    try:
+        from prefect.context import TaskRunContext, get_run_context
 
+        context: TaskRunContext = get_run_context()  # type: ignore
+        prefect_context = {
+            "flow_run_id": str(context.task_run.flow_run_id),
+            "task_run_id": str(context.task_run.id),
+            "api_url": str(context.client.api_url),
+        }
+        start_time = context.task_run.start_time
+        if start_time is not None:
+            prefect_context["task_start_time"] = start_time.isoformat()
+
+    except Exception:
+        pass
     content = {
         **{k: v for k, v in file_store_data.items() if v is not None and v != ""},
         **image.header.get_metrics(lowercase=True),
-        "flow_run_id": str(context.task_run.flow_run_id),
-        "task_run_id": str(context.task_run.id),
-        "api_url": str(context.client.api_url),
+        **prefect_context,
         "discriminator": discriminator,
         "public_dir": str(output_location.parent),
     }
-    if start_time is not None:
-        content["task_start_time"] = start_time
+
     to_write = json.dumps(content, indent=2, default=lambda x: x.isoformat() if isinstance(x, dt) else str(x))
     logger = get_logger()
     logger.info(f"Writing summary to {output_location}")

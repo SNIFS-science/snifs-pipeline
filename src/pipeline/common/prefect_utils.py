@@ -9,8 +9,16 @@ from prefect.client.schemas.filters import ArtifactFilter, ArtifactFilterFlowRun
 from prefect.client.schemas.objects import FlowRun, State
 from prefect.deployments import run_deployment as prefect_run_deployment
 from prefect.exceptions import PrefectHTTPStatusError
+from pydantic_settings import BaseSettings
 
 from pipeline.common.log import get_logger
+
+
+class Settings(BaseSettings):
+    prefect_enabled: bool = False
+
+
+settings = Settings()
 
 # from functools import wraps
 # import time
@@ -117,18 +125,20 @@ def pipeline_task(**kwargs):
         #             raise
 
         # return wrapper
-
-        final_kwargs = {**TASK_DEFAULT_KWARGS, **kwargs}
-        return task(**final_kwargs)(func)
+        if settings.prefect_enabled:
+            final_kwargs = {**TASK_DEFAULT_KWARGS, **kwargs}
+            return task(**final_kwargs)(func)
+        return func
 
     return decorate
 
 
 def pipeline_flow(**kwargs):
-    def decorate(func: Callable[P, R]) -> Flow[P, R]:
-        final_kwargs = {**FLOW_DEFAULT_KWARGS, **kwargs}
-        return flow(**final_kwargs)(func)
-
+    def decorate(func: Callable[P, R]) -> Flow[P, R] | Callable[P, R]:
+        if settings.prefect_enabled:
+            final_kwargs = {**FLOW_DEFAULT_KWARGS, **kwargs}
+            return flow(**final_kwargs)(func)
+        return func
         # tracer = get_tracer(settings.service)
         # final_kwargs = {**FLOW_DEFAULT_KWARGS, **kwargs}
 

@@ -3,12 +3,13 @@ from datetime import timezone as tz
 from functools import cached_property
 from pathlib import Path
 
-from prefect.artifacts import create_markdown_artifact
+# from prefect.artifacts import create_markdown_artifact
 from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.log import get_logger
-from pipeline.common.prefect_utils import pipeline_flow
-from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
+
+# from pipeline.common.prefect_utils import pipeline_flow
+# from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
 from pipeline.tasks.loaders import clear_directory, load_headers, load_images_from_file
@@ -86,8 +87,8 @@ class PreprocessSummary(BaseModel):
     observation_id: str | None = None
 
 
-@registry.register(SnifsNerscDeploymentConfig(max_walltime=10 * 60, memory=4 * 1952))
-@pipeline_flow()
+# @registry.register(SnifsNerscDeploymentConfig(max_walltime=10 * 60, memory=4 * 1952))
+# @pipeline_flow()
 def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     logger = get_logger()
     primary = conf.fetch_metadata(conf.primary_file)
@@ -133,7 +134,8 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     # plot_detailed_images(primary, conf.public_folder)
 
     summary = summarise_image(image, primary, conf.output_summary_file, discriminator="preprocess_exposure")
-    write_summary(conf.resolver, summary)
+    if "task_run_id" in summary:
+        write_summary(conf.resolver, summary)
     del image
 
     result = PreprocessSummary(
@@ -147,14 +149,15 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
         run_id=primary.run_id,
         observation_id=primary.observation_id,
     )
-    create_markdown_artifact(f"""```json\n{result.model_dump_json(indent=2)}\n```""", key="result")
+    # create_markdown_artifact(f"""```json\n{result.model_dump_json(indent=2)}\n```""", key="result")
     return result
 
 
 if __name__ == "__main__":
     raw_dir = Path(__file__).parents[3] / "data/level=raw"
     files = [
-        raw_dir / "runs/run_id=25_056_084/science_red.fits",
+        raw_dir / "runs/run_id=25_194_024/25_194_024_004_03_B.fits",
+        # raw_dir / "runs/run_id=25_056_084/science_red.fits",
         # raw_dir / "runs/run_id=25_056_084/science_blue.fits",
         # raw_dir / "runs/run_id=25_057_001/continuum_red.fits",
         # raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",

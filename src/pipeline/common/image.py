@@ -195,14 +195,21 @@ class Image(BaseModel):
             parent.mkdir(parents=True, exist_ok=True)
         logger = get_logger()
         logger.debug(f"Saving image to {fits_file}")
+        # BinTableHDU apparently does not like times (contains unsupported object types or mixed types)
+        # So we're going to force this to string. I hate FITS.
+        rows = [lineage.model_dump() for lineage in self.lineage]
+        for row in rows:
+            if "time" in row and row["time"] is not None:
+                row["time"] = row["time"].isoformat()
+
         hdul = fits.HDUList(
             [
-                fits.ImageHDU(data=self.data, header=self.header.to_astropy_header(), name="FLUX"),
+                fits.PrimaryHDU(data=self.data, header=self.header.to_astropy_header()),
                 fits.ImageHDU(data=self.variance, name="VARIANCE") if self.variance is not None else None,
-                fits.BinTableHDU(Table(rows=[lineage.model_dump() for lineage in self.lineage]), name="LINEAGE"),
+                fits.BinTableHDU(Table(rows=rows), name="LINEAGE"),
             ]
         )
-        hdul.writeto(fits_file, overwrite=True)
+        hdul.writeto(fits_file, overwrite=True, output_verify="fix")
 
     def to_asdf(self, asdf_file: Path | str, coerce_to_float32: bool = True) -> None:
         if isinstance(asdf_file, str):
