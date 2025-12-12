@@ -26,7 +26,7 @@ def resolve_type(
     must_match: bool = True,
 ) -> Path: ...
 @overload
-def resolve_type(
+def resolve_type(  # type: ignore
     value: str | Path | None,
     info: ValidationInfo,
     file_type: "FileType",
@@ -106,7 +106,7 @@ class FileStoreModel(DataFrameModel):
     azimuth: Series[float] = Field(nullable=True, coerce=True)
     filter: Series[str] = Field(nullable=True, coerce=True)
     channel: Series[str] = Field(nullable=True, coerce=True)
-    detector: Series[str] = Field(nullable=True, coerce=True)
+    # detector: Series[str] = Field(nullable=True, coerce=True)
 
 
 FileStoreDataFrame = DataFrame[FileStoreModel]
@@ -131,7 +131,7 @@ class FileStoreEntry(BaseModel):
     azimuth: float | None = None
     filter: str | None = None
     channel: str | None = None
-    detector: str | None = None
+    # detector: str | None = None
 
 
 FITS_HEADER_MAP = {
@@ -151,7 +151,6 @@ FITS_HEADER_MAP = {
 }
 
 
-# TODO TODO TODO: use the above to rename header values on load Image.from_fits
 def extract_details_from_fits(path: Path) -> dict[str, str | int | float | dt]:
     values = {}
     with fits.open(path) as hdul:  # type: ignore
@@ -180,7 +179,7 @@ def extract_details_from_asdf(path: Path) -> dict[str, str | int | float | dt]:
     from asdf import AsdfFile
 
     af: AsdfFile
-    with asdf.open(path) as af:
+    with asdf.open(path) as af:  # type: ignore
         if "metadata" not in af:
             return values
         metadata = {k.lower(): v for k, v in af["metadata"].items()}
@@ -206,9 +205,9 @@ def extract_file_details(path: Path) -> FileStoreDataFrame | None:  # noqa: C901
         "file_name": path.name,
         "time_added": dt.now(tz=tz.utc),
     }
-    if path.suffix == ".fits":
+    if path.suffix.lower() == ".fits":
         values = extract_details_from_fits(path) | values
-    elif path.suffix == ".asdf":
+    elif path.suffix.lower() == ".asdf":
         values = extract_details_from_asdf(path) | values
 
     # Ensure all lowercase

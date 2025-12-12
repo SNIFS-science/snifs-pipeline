@@ -1,5 +1,4 @@
 import asyncio
-from collections.abc import Awaitable
 from datetime import datetime as dt
 from functools import cached_property
 from pathlib import Path
@@ -8,19 +7,18 @@ import polars as pl
 from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.image import Image
-from pipeline.common.log import get_logger
-from pipeline.common.prefect_utils import pipeline_flow, run_deployment
-from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
-from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, PreprocessSummary, preprocess_exposure
-from pipeline.resolver.common import FileStoreEntry, FileType, PipelineStage
+from pipeline.common.prefect_utils import pipeline_flow
+
+# from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
+from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
+from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
 from pipeline.tasks.processing.calibration import calibrate_continuum, calibrate_wavelengths
-from pipeline.tasks.summaries import summarise_image, write_summary
+from pipeline.tasks.summaries import summarise_image
 
 
 class ProcessRunConfig(FlowConfig):
     run_id: str = Field(description="The ID of the run to process.", examples=["25_057_001"])
-    inline_flows: bool = Field(default=True, description="Whether to run inline flows or give them to slurm")
     refresh_filestore: bool = Field(default=True)
 
     @cached_property
@@ -52,47 +50,26 @@ class ProcessRunSummary(BaseModel):
     observation_id: str | None = None
 
 
-@registry.register(SnifsNerscDeploymentConfig(max_walltime=120 * 60, memory=3 * 1952))
+# @registry.register(SnifsNerscDeploymentConfig(max_walltime=120 * 60, memory=3 * 1952))
 @pipeline_flow()
 async def process_run(conf: ProcessRunConfig) -> None:
     conf.initialise_and_log()
-    logger = get_logger()
-    # All exposures for the run should be processed
-    exposures = [
-        FileStoreEntry.model_validate(entry)
-        for entry in conf.resolver.file_store.filter(
-            pl.col("run_id").eq(conf.run_id) & pl.col("level").eq("raw")
-        ).to_dicts()
-    ]
 
-    if conf.inline_flows:
-        processed = [
-            preprocess_exposure(PreprocessExposureConfig(primary_file=Path(exp.file_path))) for exp in exposures
-        ]
-    else:
-        coros: list[Awaitable[dict | None]] = [
-            run_deployment(
-                flow_name="preprocess-exposure",
-                deployment_name="preprocess-exposure",
-                flow_run_name=f"preprocess_{exp.file_path}",
-                parameters={"conf": {"primary_file": Path(exp.file_path)}},
-                poll_interval=60,
-            )
-            for exp in exposures
-        ]  # type: ignore
-        artifacts = await asyncio.gather(*coros)
-        for artifact in artifacts:
-            logger.info(f"Got artifact: {artifact}")
-        processed = [PreprocessSummary.model_validate(artifact) for artifact in artifacts if artifact]  # type: ignore
+    # First, we want to grab all raw exposures associated with this run.
+    run_filter = pl.col("run_id").eq(conf.run_id) & pl.col("level").eq("raw")
+    exposure_paths = [Path(p) for p in conf.resolver.file_store.filter(run_filter)["file_path"]]
 
+    # For each of these exposures, we want to trigger the preprocess flow to clean them up.
+    processed = [preprocess_exposure(PreprocessExposureConfig(primary_file=path)) for path in exposure_paths]
+
+    # The joy of things being on disk is that they can be deleted at any time. Double
+    # check that all the expected output images exist
     for p in processed:
         conf.resolver.ensure_file_exists(p.output_path)
 
     # We need to separate science exposures from others because they're the main focus
     science_exposures = [p for p in processed if p.file_type == FileType.SCIENCE]
 
-    # # TODO: This part should be done by the resolver, which means ensuring that output
-    # # TODO: files from other flows are automatically added to the resolver on creation
     for file_entry in science_exposures:
         image = Image.from_asdf(file_entry.output_path)
 
@@ -108,13 +85,13 @@ async def process_run(conf: ProcessRunConfig) -> None:
         wavelength_calibrated = calibrate_wavelengths(flat_fielded, arc_image)
         wavelength_calibrated.to_asdf(conf.output_file)
         conf.resolver.ensure_file_exists(conf.output_file)
-        summary = summarise_image(
+        summarise_image(
             image,
             conf.resolver.get_file_metadata(file_entry.output_path),
             conf.output_summary_file,
             discriminator="process_exposure",
         )
-        write_summary(conf.resolver, summary)
+        # write_summary(conf.resolver, summary)
 
 
 if __name__ == "__main__":

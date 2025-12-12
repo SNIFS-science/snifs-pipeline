@@ -1,9 +1,0 @@
-[theme]
-base = "dark"
-primaryColor = "#4ade80"
-backgroundColor = "#18181b"
-secondaryBackgroundColor = "#27272a"
-textColor = "#f4f4f5"
-linkColor = "#4ade80"
-linkUnderline = false
-codeBackgroundColor = "#1f2937"

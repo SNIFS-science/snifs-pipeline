@@ -19,13 +19,16 @@ dependencies = [
     "pandas>=2.3.1",
     "pandera>=0.23.1",
     "polars>=1.26.0",
-    "prefect>=3.3.1",
+    "prefect>=3.6.6",
     "prefect-docker>=0.6.6",
     "pycosmic",
     "pydantic>=2.11.0",
     "pydantic-settings>=2.8.1",
     "scipy>=1.15.3",
 ]
+
+[project.optional-dependencies]
+prefect = []
 
 
 [dependency-groups]

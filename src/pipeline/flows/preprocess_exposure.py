@@ -3,13 +3,12 @@ from datetime import timezone as tz
 from functools import cached_property
 from pathlib import Path
 
-# from prefect.artifacts import create_markdown_artifact
 from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.log import get_logger
 
-# from pipeline.common.prefect_utils import pipeline_flow
 # from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
+from pipeline.common.prefect_utils import create_markdown_artifact, pipeline_flow
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
 from pipeline.tasks.loaders import clear_directory, load_headers, load_images_from_file
@@ -46,6 +45,7 @@ class PreprocessExposureConfig(FlowConfig):
     prefer_bias_image: bool = Field(default=True)
     use_dark_stack_if_possible: bool = Field(default=True)
     refresh_filestore: bool = Field(default=True)
+    use_cache: bool = Field(default=True, description="Whether to use cached files where possible.")
 
     @cached_property
     def output_folder(self) -> Path:
@@ -74,6 +74,11 @@ class PreprocessExposureConfig(FlowConfig):
     def output_summary_file(self) -> Path:
         return self.public_folder / f"{PipelineStage.PREPROCESSED.value}_summary.json"
 
+    @computed_field
+    @property
+    def flow_summary_file(self) -> Path:
+        return self.public_folder / f"{PipelineStage.PREPROCESSED.value}_flow_summary.json"
+
 
 class PreprocessSummary(BaseModel):
     source_path: str
@@ -88,9 +93,14 @@ class PreprocessSummary(BaseModel):
 
 
 # @registry.register(SnifsNerscDeploymentConfig(max_walltime=10 * 60, memory=4 * 1952))
-# @pipeline_flow()
+@pipeline_flow()
 def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     logger = get_logger()
+
+    if conf.use_cache and conf.flow_summary_file.exists() and conf.output_image_file.exists():
+        logger.info(f"Using cached preprocessed exposure at {conf.output_image_file}")
+        return PreprocessSummary.model_validate_json(conf.flow_summary_file.read_text())
+
     primary = conf.fetch_metadata(conf.primary_file)
     conf.initialise_and_log()
     logger.info(f"Primary file:\n{primary.model_dump_json(indent=2)}\n")
@@ -124,7 +134,7 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     # Apply the custom red flat if we can't find a flat at all, or we're processing a red flat.
     if primary.channel == "R" and (conf.flat_image_file is None or conf.flat_image_file == conf.primary_file):
         image = apply_custom_red_flat(image)
-    # image = remove_cosmic_rays(image)
+    image = remove_cosmic_rays(image)
 
     image.header["level"] = "preprocess"
     image.to_asdf(conf.output_image_file)
@@ -149,15 +159,16 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
         run_id=primary.run_id,
         observation_id=primary.observation_id,
     )
-    # create_markdown_artifact(f"""```json\n{result.model_dump_json(indent=2)}\n```""", key="result")
+    conf.flow_summary_file.write_text(result.model_dump_json(indent=2))
+    create_markdown_artifact(f"""```json\n{result.model_dump_json(indent=2)}\n```""", key="result")
     return result
 
 
 if __name__ == "__main__":
     raw_dir = Path(__file__).parents[3] / "data/level=raw"
     files = [
-        raw_dir / "runs/run_id=25_194_024/25_194_024_004_03_B.fits",
-        # raw_dir / "runs/run_id=25_056_084/science_red.fits",
+        # raw_dir / "runs/run_id=25_194_024/25_194_024_004_03_B.fits",
+        raw_dir / "runs/run_id=25_056_084/science_red.fits",
         # raw_dir / "runs/run_id=25_056_084/science_blue.fits",
         # raw_dir / "runs/run_id=25_057_001/continuum_red.fits",
         # raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",

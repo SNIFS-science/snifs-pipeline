@@ -3,6 +3,7 @@ from pathlib import Path
 
 import polars as pl
 import prefect
+from loguru import logger
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -37,6 +38,7 @@ class Resolver(BaseModel):
         assert self.file_store_path.exists(), (
             f"File store not found at {self.file_store_path}. Please build it via `build_filestore`"
         )
+        logger.info(f"Loading filestore from {self.file_store_path}")
         return pl.read_parquet(self.file_store_path).pipe(FileStoreDataFrame)
 
     @cached_property
