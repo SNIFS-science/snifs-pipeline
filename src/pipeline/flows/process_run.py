@@ -6,15 +6,12 @@ from pathlib import Path
 import polars as pl
 from pydantic import BaseModel, Field, computed_field
 
-from pipeline.common.image import Image
 from pipeline.common.prefect_utils import pipeline_flow
 
 # from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
-from pipeline.tasks.processing.calibration import calibrate_continuum, calibrate_wavelengths
-from pipeline.tasks.summaries import summarise_image
 
 
 class ProcessRunConfig(FlowConfig):
@@ -68,30 +65,38 @@ async def process_run(conf: ProcessRunConfig) -> None:
         conf.resolver.ensure_file_exists(p.output_path)
 
     # We need to separate science exposures from others because they're the main focus
-    science_exposures = [p for p in processed if p.file_type == FileType.SCIENCE]
+    arc_exposures = [p for p in processed if p.file_type == FileType.ARC]
+    # science_exposures = [p for p in processed if p.file_type == FileType.SCIENCE]
 
-    for file_entry in science_exposures:
-        image = Image.from_asdf(file_entry.output_path)
+    for arc in arc_exposures:
+        if arc.channel == "B":
+            wavelength_calibration_config = WavelengthConfig(
+                arc_path=arc.output_path,
+            )
+            wavelength_arc_calibration(wavelength_calibration_config)
 
-        continuums = [e for e in processed if e.file_type == FileType.CONTINUUM and e.channel == file_entry.channel]
-        assert len(continuums) == 1
-        continuum_image = Image.from_asdf(continuums[0].output_path)
+    # for file_entry in science_exposures:
+    #     image = Image.from_asdf(file_entry.output_path)
 
-        arcs = [e for e in processed if e.file_type == FileType.ARC and e.channel == file_entry.channel]
-        assert len(arcs) == 1
-        arc_image = Image.from_asdf(arcs[0].output_path)
+    #     continuums = [e for e in processed if e.file_type == FileType.CONTINUUM and e.channel == file_entry.channel]
+    #     assert len(continuums) == 1
+    #     continuum_image = Image.from_asdf(continuums[0].output_path)
 
-        flat_fielded = calibrate_continuum(image, continuum_image)
-        wavelength_calibrated = calibrate_wavelengths(flat_fielded, arc_image)
-        wavelength_calibrated.to_asdf(conf.output_file)
-        conf.resolver.ensure_file_exists(conf.output_file)
-        summarise_image(
-            image,
-            conf.resolver.get_file_metadata(file_entry.output_path),
-            conf.output_summary_file,
-            discriminator="process_exposure",
-        )
-        # write_summary(conf.resolver, summary)
+    #     arcs = [e for e in processed if e.file_type == FileType.ARC and e.channel == file_entry.channel]
+    #     assert len(arcs) == 1
+    #     arc_image = Image.from_asdf(arcs[0].output_path)
+
+    #     flat_fielded = calibrate_continuum(image, continuum_image)
+    #     wavelength_calibrated = calibrate_wavelengths(flat_fielded, arc_image)
+    #     wavelength_calibrated.to_asdf(conf.output_file)
+    #     conf.resolver.ensure_file_exists(conf.output_file)
+    #     summarise_image(
+    #         image,
+    #         conf.resolver.get_file_metadata(file_entry.output_path),
+    #         conf.output_summary_file,
+    #         discriminator="process_exposure",
+    #     )
+    #     # write_summary(conf.resolver, summary)
 
 
 if __name__ == "__main__":

@@ -3,11 +3,52 @@ import numpy as np
 from matplotlib.colors import LogNorm
 from scipy.optimize import curve_fit
 
+from pipeline import settings
 
+PEAKS = [
+    5769.6,
+    5460.735,
+    5085.822,
+    4916,
+    4358.328,
+    4198.317,
+    4158.59,
+    4077.837,
+    4046.563,
+    3906.371,
+    3663.279,
+    3650.153,
+    3610.5077,
+    3466.1996,
+    3261.0548,
+    3131.7,
+]
+
+PEAK_ESTIMATES = np.array(
+    [
+        [300, 390],
+        [400, 550],
+        [580, 640],
+        [641, 705],
+        [705, 770],
+        [880, 920],
+        [1000, 1100],
+        [1150, 1250],
+        [1400, 1448],
+    ]
+)
+
+WAVELENGTH_VALUES = np.array([5769.6, 5460.735, 5085.822, 4916, 4799.912, 4358.1, 4045.3, 3651.3, 3131.7])
+
+
+# TODO: We should move these common math functions into the common package, maybe in a math_utils.py file
+# TODO: all of these should be updated to have type hints np.ndarray
+# TODO: we should put some basic docstring for all common functions. googledoc style preferred.
 def gaussian(x, amp, mu, sigma, offset):
     return amp * np.exp(-0.5 * ((x - mu) / sigma) ** 2) + offset
 
 
+# TODO: same as the above
 def double_gaussian(x, amp1, center, sigma1, amp2, delta, sigma2, offset):
     # defined this way to control distance between the two
     mu1 = center - delta / 2
@@ -15,12 +56,16 @@ def double_gaussian(x, amp1, center, sigma1, amp2, delta, sigma2, offset):
     return amp1 * np.exp(-0.5 * ((x - mu1) / sigma1) ** 2) + amp2 * np.exp(-0.5 * ((x - mu2) / sigma2) ** 2) + offset
 
 
+# TODO: make sure that the path is a path (not a string)
 def make_array(path, spectrum_path):
+    # TODO: make_array name could be more informative
     big_arr = []
     file2 = spectrum_path
     a = np.load(file2)
     # should check that the loaded file is the size we expect it to be otherwise will have problems
+    # TODO: should we pull out the magic number into a const?
     spectra = a.reshape(225, -1)
+    # TODO: we should load this in as early as possible and pass the data in, rather than file
     file = f"{path}.npy"
     data_cross = np.load(file)
     for i in range(0, 225):
@@ -74,13 +119,17 @@ def refine_peak_centers(spectrum, centers, window=10, double_range=(300, 400)):
             upper = [np.inf, min(c + window, len(spectrum) - 1), np.inf, np.inf, 4.0, np.inf, np.inf]
 
             # Ensure p_0 is feasible (clip center into [lower,upper] etc.)
+            # TODO: this makes Sam sad.
+            # p_0_clipped = [
+            #     float(np.clip(p, l, u) if np.isfinite(u) else 1e12) for p, l, u in zip(p_0, lower, upper, strict=True)
+            # ]
             p_0_clipped = [
-                float(np.clip(p_0[0], lower[0], upper[0])),
-                float(np.clip(p_0[1], lower[1], upper[1])),
-                float(np.clip(p_0[2], lower[2], upper[2])),
-                float(np.clip(p_0[3], lower[3], upper[3])),
-                float(np.clip(p_0[4], lower[4], upper[4])),
-                float(np.clip(p_0[5], lower[5], upper[5])),
+                float(np.clip(p_0[0], lower[0], upper[0] if np.isfinite(upper[0]) else 1e12)),
+                float(np.clip(p_0[1], lower[1], upper[1] if np.isfinite(upper[1]) else 1e12)),
+                float(np.clip(p_0[2], lower[2], upper[2] if np.isfinite(upper[2]) else 1e12)),
+                float(np.clip(p_0[3], lower[3], upper[3] if np.isfinite(upper[3]) else 1e12)),
+                float(np.clip(p_0[4], lower[4], upper[4] if np.isfinite(upper[4]) else 1e12)),
+                float(np.clip(p_0[5], lower[5], upper[5] if np.isfinite(upper[5]) else 1e12)),
                 float(np.clip(p_0[6], lower[6], upper[6] if np.isfinite(upper[6]) else 1e12)),
             ]
 
@@ -148,14 +197,16 @@ def refine_peak_centers(spectrum, centers, window=10, double_range=(300, 400)):
     return np.array(new_centers), fit_params
 
 
-def cal_spec(spec, est_peaks, wavelen, dynamic=False):
+def cal_spec(spec, est_peaks, wavelen):
     # need to add a lot of robustness checks here
+
     other_peaks = []
     for peak in est_peaks:
         a, b = peak
         other_peaks.append(a + np.nanargmax(spec[a:b]))
     other_new_centers, p = refine_peak_centers(spec, other_peaks, window=3)
-    if dynamic:
+    if settings.plot:
+        # TODO: move the plotting code out
         print(p)
         plt.plot(spec)
         plt.vlines(other_new_centers, 0, 10e5, color="r", alpha=0.5)
@@ -216,6 +267,8 @@ def plot_params(params, name):
     plt.show()
 
 
+# TODO: move plotting into a separate file
+# TODO: only call the plotting based on the global settings
 def plot_spec(wavelengths, fluxes, save=False, name="sample"):
     # Flatten the data for plotting
     X = wavelengths.flatten()  # Wavelengths
@@ -263,58 +316,57 @@ def plot_spec(wavelengths, fluxes, save=False, name="sample"):
         plt.savefig(f"{name}fitwavelengths.png", dpi=300, bbox_inches="tight")
 
 
+# TODO: make the code in here a top level function (flow) with the entrypoint just calling that function
+# TODO: this top level function should take a pydantic configuration object so it can easily integrate with prefect
 if __name__ == "__main__":
-    peaks = [
-        5769.6,
-        5460.735,
-        5085.822,
-        4916,
-        4358.328,
-        4198.317,
-        4158.59,
-        4077.837,
-        4046.563,
-        3906.371,
-        3663.279,
-        3650.153,
-        3610.5077,
-        3466.1996,
-        3261.0548,
-        3131.7,
-    ]
+    # class WavelengthSearch(TypedDict):
+    #     wavelength_anstroms: float
+    #     pixel_start_search: int
+    #     pixel_end_search: int
 
-    peak_estimates = np.array(
-        [
-            [300, 390],
-            [400, 550],
-            [580, 640],
-            [641, 705],
-            [705, 770],
-            [880, 920],
-            [1000, 1100],
-            [1150, 1250],
-            [1400, 1448],
-        ]
-    )
+    # class WavelengthSearch2(BaseModel):
+    #     wavelength_anstroms: float
+    #     pixel_start_search: int
+    #     pixel_end_search: int
 
-    wavelength_values = np.array([5769.6, 5460.735, 5085.822, 4916, 4799.912, 4358.1, 4045.3, 3651.3, 3131.7])
+    # @dataclass
+    # class WavelengthConfig:
+    #     wavelength_anstroms: float
+    #     pixel_start_search: int
+    #     pixel_end_search: int
+
+    # wavelengths_to_fit: dict[str, WavelengthSearch2] = {
+    #     "mercury_1": WavelengthSearch2(
+    #         wavelength_anstroms=5769.6,
+    #         pixel_start_search=300,
+    #         pixel_end_search=390,
+    #     )
+    # }
 
     # I know you do this file selection stuff much better in preprocess_exposure
+    # TODO: NEVER USE OS ITS DISGUSTING TO ME
     import os
 
+    # TODO: we should have the main function (flow) take in a specific arc file path
+    # TODO: and run over that - and we can loop through all the available arcs outside of the function
+    # TODO: in the name==main entrypoint
     rootdir = "/home/anousha/snifs_model/"
     for _subdir, dirs, _files in os.walk(rootdir):
         for dire in dirs:
             name = str(dire)
+            # TODO: boooooo for hardcoding this - we should try to stitch it into the preprocess output
             if "P25_" in name and "B" in name:
                 print(f"wavelength calibrating {name}")
+                # TODO: Where this file come from?
+                # TODO: We should pull the code that generates this file into this "flow"
                 big_arr = make_array(rootdir + name + "_crossSumFitArc", rootdir + name + "_fit_arc_vector.npy")
                 big_wave = []
                 params = []
                 residuals = []
+                # TODO: what is the first dim representing? ah - each spaxel
                 for i in range(big_arr.shape[0]):
                     spec = big_arr[i]
-                    waves, ps, res = cal_spec(spec, peak_estimates, wavelength_values)
+                    waves, ps, res = cal_spec(spec, PEAK_ESTIMATES, WAVELENGTH_VALUES)
                     big_wave.append(waves)
                     params.append(ps)
                     residuals.extend(res)
@@ -324,8 +376,8 @@ if __name__ == "__main__":
                 residuals = []
                 for i in range(big_arr.shape[0]):
                     spec = big_arr[i]
-                    closest_indices = [find_closest_index(big_wave[i], p) for p in peaks]
-                    waves, ps, res = recalc_spec(spec, closest_indices, peaks)
+                    closest_indices = [find_closest_index(big_wave[i], p) for p in PEAKS]
+                    waves, ps, res = recalc_spec(spec, closest_indices, PEAKS)
                     big_wave[i] = waves
                     params[i] = ps
                     residuals.extend(res)

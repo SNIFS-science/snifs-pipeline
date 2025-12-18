@@ -1,17 +1,72 @@
 import inspect
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import asdf
 import numpy as np
 from astropy.io import fits
 from astropy.table import Table
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from pipeline.common.headers import Headers
 from pipeline.common.lineage import Lineage
 from pipeline.common.log import get_logger
 from pipeline.common.section import Section
+
+
+# TODO: consider using something like the dataclass below for file IO to make your life easier down the line
+class CalibrationData(BaseModel):
+    header: Headers
+    wavelengths: np.ndarray
+    fluxes: np.ndarray
+    lineage: list[Lineage] = []
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def check_shapes(self) -> Self:
+        if self.wavelengths.shape != self.fluxes.shape:
+            raise ValueError(
+                f"Wavelengths and fluxes must have the same shape, got {self.wavelengths.shape} and {self.fluxes.shape}"
+            )
+        return self
+
+    @classmethod
+    def from_asdf(cls, asdf_file: Path | str) -> "CalibrationData":
+        if isinstance(asdf_file, str):
+            asdf_file = Path(asdf_file)
+        logger = get_logger()
+        logger.debug(f"Loading image from {asdf_file}")
+
+        with asdf.open(asdf_file) as af:
+            wavelengths = af["wavelengths"]
+            fluxes = af["fluxes"]
+            wavelengths._make_array()
+            fluxes._make_array()
+            header = Headers.from_dict(af["metadata"])
+            lineage = [Lineage(**lineage) for lineage in af["lineage"]]
+
+        return CalibrationData(wavelengths=wavelengths._array, fluxes=fluxes._array, header=header, lineage=lineage)
+
+    def to_asdf(self, asdf_file: Path | str) -> None:
+        if isinstance(asdf_file, str):
+            asdf_file = Path(asdf_file)
+        parent = asdf_file.parent
+        if not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+        logger = get_logger()
+        logger.debug(f"Saving image to {asdf_file}")
+
+        af = asdf.AsdfFile(
+            {
+                "metadata": self.header.to_dict(),
+                "wavelengths": self.wavelengths,
+                "fluxes": self.fluxes,
+                "lineage": [lineage.model_dump() for lineage in self.lineage],
+            }
+        )
+
+        af.write_to(asdf_file, all_array_compression="zlib", compression_kwargs={"level": 9})
 
 
 class Image(BaseModel):
