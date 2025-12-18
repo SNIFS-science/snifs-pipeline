@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Nov 24 11:20:16 2025
-
-@author: anousha
-"""
-
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LogNorm
@@ -23,19 +15,19 @@ def double_gaussian(x, amp1, center, sigma1, amp2, delta, sigma2, offset):
     return amp1 * np.exp(-0.5 * ((x - mu1) / sigma1) ** 2) + amp2 * np.exp(-0.5 * ((x - mu2) / sigma2) ** 2) + offset
 
 
-def makeArray(path, spectrumPath):
-    bigArr = []
-    file2 = spectrumPath
+def make_array(path, spectrum_path):
+    big_arr = []
+    file2 = spectrum_path
     a = np.load(file2)
     # should check that the loaded file is the size we expect it to be otherwise will have problems
     spectra = a.reshape(225, -1)
     file = f"{path}.npy"
-    dataCross = np.load(file)
+    data_cross = np.load(file)
     for i in range(0, 225):
-        avgCross = np.mean(dataCross[1400 * i : 1400 * i + 1], axis=0)
-        spectrum = np.convolve(avgCross, spectra[i])
-        bigArr.append(spectrum)
-    return np.array(bigArr)
+        avg_cross = np.mean(data_cross[1400 * i : 1400 * i + 1], axis=0)
+        spectrum = np.convolve(avg_cross, spectra[i])
+        big_arr.append(spectrum)
+    return np.array(big_arr)
 
 
 # double_range isn't the most robust way to do this. I think I should modify it so I can input a list of flags
@@ -53,19 +45,19 @@ def refine_peak_centers(spectrum, centers, window=10, double_range=(300, 400)):
         y_fit = spectrum[i1:i2]
 
         # common offset guess
-        offset0 = np.median(y_fit)
+        offset_0 = np.median(y_fit)
 
         if double_range[0] <= c <= double_range[1] and len(x_fit) >= 5:
             # --- Double Gaussian fit with safe/consistent p0 and bounds ---
-            amp_guess = max(spectrum[int(round(c))] - offset0, 1e-6)
+            amp_guess = max(spectrum[int(round(c))] - offset_0, 1e-6)
 
             # initial two-peak positions relative to c
             mu1_0 = c - window / 4.0
             mu2_0 = c + window / 4.0
 
             # center/delta parameterization
-            center0 = 0.5 * (mu1_0 + mu2_0)
-            delta0 = mu2_0 - mu1_0
+            center_0 = 0.5 * (mu1_0 + mu2_0)
+            delta_0 = mu2_0 - mu1_0
 
             sigma1_0 = sigma2_0 = max(window / 3.0, 1e-3)
 
@@ -73,28 +65,28 @@ def refine_peak_centers(spectrum, centers, window=10, double_range=(300, 400)):
             amp1_0 = max(amp_guess, 1e-6)
             amp2_0 = max(amp_guess, 1e-6)
 
-            # Clip delta0 into allowed range [1e-6, 4]
-            delta0 = float(np.clip(delta0, 1e-6, 4.0))
+            # Clip delta_0 into allowed range [1e-6, 4]
+            delta_0 = float(np.clip(delta_0, 1e-6, 4.0))
 
-            p0 = [amp1_0, center0, sigma1_0, amp2_0, delta0, sigma2_0, offset0]
+            p_0 = [amp1_0, center_0, sigma1_0, amp2_0, delta_0, sigma2_0, offset_0]
 
             lower = [0.0, max(c - window, 0), 1e-6, 0.0, 1e-6, 1e-6, -np.inf]
             upper = [np.inf, min(c + window, len(spectrum) - 1), np.inf, np.inf, 4.0, np.inf, np.inf]
 
-            # Ensure p0 is feasible (clip center into [lower,upper] etc.)
-            p0_clipped = [
-                float(np.clip(p0[0], lower[0], upper[0])),
-                float(np.clip(p0[1], lower[1], upper[1])),
-                float(np.clip(p0[2], lower[2], upper[2])),
-                float(np.clip(p0[3], lower[3], upper[3])),
-                float(np.clip(p0[4], lower[4], upper[4])),
-                float(np.clip(p0[5], lower[5], upper[5])),
-                float(np.clip(p0[6], lower[6], upper[6] if np.isfinite(upper[6]) else 1e12)),
+            # Ensure p_0 is feasible (clip center into [lower,upper] etc.)
+            p_0_clipped = [
+                float(np.clip(p_0[0], lower[0], upper[0])),
+                float(np.clip(p_0[1], lower[1], upper[1])),
+                float(np.clip(p_0[2], lower[2], upper[2])),
+                float(np.clip(p_0[3], lower[3], upper[3])),
+                float(np.clip(p_0[4], lower[4], upper[4])),
+                float(np.clip(p_0[5], lower[5], upper[5])),
+                float(np.clip(p_0[6], lower[6], upper[6] if np.isfinite(upper[6]) else 1e12)),
             ]
 
             try:
                 popt, pcov = curve_fit(
-                    double_gaussian, x_fit, y_fit, p0=p0_clipped, bounds=(lower, upper), maxfev=20000
+                    double_gaussian, x_fit, y_fit, p0=p_0_clipped, bounds=(lower, upper), maxfev=20000
                 )
                 amp1, center, sigma1, amp2, delta, sigma2, offset = popt
                 mu1 = center - delta / 2.0
@@ -122,19 +114,19 @@ def refine_peak_centers(spectrum, centers, window=10, double_range=(300, 400)):
 
         else:
             # normal single peak fitting
-            amp0 = max(spectrum[int(round(c))] - offset0, 1e-6)
-            mu0 = float(c)
-            sigma0 = max(window / 2.0, 1e-3)
+            amp_0 = max(spectrum[int(round(c))] - offset_0, 1e-6)
+            mu_0 = float(c)
+            sigma_0 = max(window / 2.0, 1e-3)
 
-            p0_single = [amp0, mu0, sigma0, offset0]
+            p_0_single = [amp_0, mu_0, sigma_0, offset_0]
             lower_single = [0.0, max(c - window, 0), 1e-6, -np.inf]
             upper_single = [np.inf, min(c + window, len(spectrum) - 1), np.inf, np.inf]
 
-            p0_single = [float(np.clip(p0_single[i], lower_single[i], upper_single[i])) for i in range(4)]
+            p_0_single = [float(np.clip(p_0_single[i], lower_single[i], upper_single[i])) for i in range(4)]
 
             try:
                 popt, pcov = curve_fit(
-                    gaussian, x_fit, y_fit, p0=p0_single, bounds=(lower_single, upper_single), maxfev=20000
+                    gaussian, x_fit, y_fit, p0=p_0_single, bounds=(lower_single, upper_single), maxfev=20000
                 )
                 amp, mu, sigma, offset = popt
                 new_centers.append(float(mu))
@@ -156,33 +148,28 @@ def refine_peak_centers(spectrum, centers, window=10, double_range=(300, 400)):
     return np.array(new_centers), fit_params
 
 
-def calSpec(
-    spec,
-    estPeaks,
-    wavelen,
-    dynamic=False,
-):
+def cal_spec(spec, est_peaks, wavelen, dynamic=False):
     # need to add a lot of robustness checks here
-    otherPeaks = []
-    for peak in estPeaks:
+    other_peaks = []
+    for peak in est_peaks:
         a, b = peak
-        otherPeaks.append(a + np.nanargmax(spec[a:b]))
-    otherNewCenters, p = refine_peak_centers(spec, otherPeaks, window=3)
+        other_peaks.append(a + np.nanargmax(spec[a:b]))
+    other_new_centers, p = refine_peak_centers(spec, other_peaks, window=3)
     if dynamic:
         print(p)
         plt.plot(spec)
-        plt.vlines(otherNewCenters, 0, 10e5, color="r", alpha=0.5)
+        plt.vlines(other_new_centers, 0, 10e5, color="r", alpha=0.5)
         plt.ylim(10, np.max(spec) * 1.1)
         plt.yscale("log")
         plt.show()
-    xPoints = np.array(range(len(spec)))
+    x_points = np.array(range(len(spec)))
     other_lbda = np.array(wavelen)
-    p3 = np.polyfit(otherNewCenters, other_lbda, 3)
-    wavelengths3 = p3[0] * xPoints**3 + p3[1] * xPoints**2 + p3[2] * xPoints + p3[3]
+    p_3 = np.polyfit(other_new_centers, other_lbda, 3)
+    wavelengths_3 = p_3[0] * x_points**3 + p_3[1] * x_points**2 + p_3[2] * x_points + p_3[3]
 
-    fitted_centers_lbda = np.polyval(p3, otherNewCenters)
+    fitted_centers_lbda = np.polyval(p_3, other_new_centers)
     residuals = fitted_centers_lbda - other_lbda
-    return wavelengths3, p3, residuals**2
+    return wavelengths_3, p_3, residuals**2
 
 
 def find_closest_index(array, value):
@@ -190,20 +177,20 @@ def find_closest_index(array, value):
     return idx
 
 
-def recalcSpec(spec, peaks, lbda):
+def recalc_spec(spec, peaks, lbda):
     # this is the part that takes the longest time
-    otherNewCenters, p = refine_peak_centers(spec, peaks, window=3)
-    xPoints = np.array(range(len(spec)))
+    other_new_centers, p = refine_peak_centers(spec, peaks, window=3)
+    x_points = np.array(range(len(spec)))
     other_lbda = np.array(lbda)
-    p3 = np.polyfit(otherNewCenters, other_lbda, 3)
-    wavelengths3 = p3[0] * xPoints**3 + p3[1] * xPoints**2 + p3[2] * xPoints + p3[3]
+    p_3 = np.polyfit(other_new_centers, other_lbda, 3)
+    wavelengths_3 = p_3[0] * x_points**3 + p_3[1] * x_points**2 + p_3[2] * x_points + p_3[3]
 
-    fitted_centers_lbda = np.polyval(p3, otherNewCenters)
+    fitted_centers_lbda = np.polyval(p_3, other_new_centers)
     residuals = fitted_centers_lbda - other_lbda
-    return wavelengths3, p3, residuals**2
+    return wavelengths_3, p_3, residuals**2
 
 
-def plotParams(params, name):
+def plot_params(params, name):
     fig, ax = plt.subplots(2, 2)
 
     params = np.array(params)
@@ -229,7 +216,7 @@ def plotParams(params, name):
     plt.show()
 
 
-def plotSpec(wavelengths, fluxes, save=False, name="sample"):
+def plot_spec(wavelengths, fluxes, save=False, name="sample"):
     # Flatten the data for plotting
     X = wavelengths.flatten()  # Wavelengths
     Y = np.repeat(np.arange(225), 1499)  # Object indices
@@ -296,7 +283,7 @@ if __name__ == "__main__":
         3131.7,
     ]
 
-    peakEstimates = np.array(
+    peak_estimates = np.array(
         [
             [300, 390],
             [400, 550],
@@ -310,7 +297,7 @@ if __name__ == "__main__":
         ]
     )
 
-    wavelengthValues = np.array([5769.6, 5460.735, 5085.822, 4916, 4799.912, 4358.1, 4045.3, 3651.3, 3131.7])
+    wavelength_values = np.array([5769.6, 5460.735, 5085.822, 4916, 4799.912, 4358.1, 4045.3, 3651.3, 3131.7])
 
     # I know you do this file selection stuff much better in preprocess_exposure
     import os
@@ -321,29 +308,29 @@ if __name__ == "__main__":
             name = str(dire)
             if "P25_" in name and "B" in name:
                 print(f"wavelength calibrating {name}")
-                bigArr = makeArray(rootdir + name + "_crossSumFitArc", rootdir + name + "_fit_arc_vector.npy")
-                bigWave = []
+                big_arr = make_array(rootdir + name + "_crossSumFitArc", rootdir + name + "_fit_arc_vector.npy")
+                big_wave = []
                 params = []
                 residuals = []
-                for i in range(bigArr.shape[0]):
-                    spec = bigArr[i]
-                    waves, ps, res = calSpec(spec, peakEstimates, wavelengthValues)
-                    bigWave.append(waves)
+                for i in range(big_arr.shape[0]):
+                    spec = big_arr[i]
+                    waves, ps, res = cal_spec(spec, peak_estimates, wavelength_values)
+                    big_wave.append(waves)
                     params.append(ps)
                     residuals.extend(res)
                 print("early RMS: ", np.sqrt(np.mean(residuals)))
-                bigWave = np.array(bigWave)
+                big_wave = np.array(big_wave)
                 print("refitting")
                 residuals = []
-                for i in range(bigArr.shape[0]):
-                    spec = bigArr[i]
-                    closest_indices = [find_closest_index(bigWave[i], p) for p in peaks]
-                    waves, ps, res = recalcSpec(spec, closest_indices, peaks)
-                    bigWave[i] = waves
+                for i in range(big_arr.shape[0]):
+                    spec = big_arr[i]
+                    closest_indices = [find_closest_index(big_wave[i], p) for p in peaks]
+                    waves, ps, res = recalc_spec(spec, closest_indices, peaks)
+                    big_wave[i] = waves
                     params[i] = ps
                     residuals.extend(res)
-                plotParams(params, name)
+                plot_params(params, name)
                 print("late RMS: ", np.sqrt(np.mean(residuals)))
-                plotSpec(bigWave, bigArr, save=True, name=name)
-                np.save(f"{name}fitWavelengthCal", bigWave)
+                plot_spec(big_wave, big_arr, save=True, name=name)
+                np.save(f"{name}fitWavelengthCal", big_wave)
                 print(f"done with {name}")
