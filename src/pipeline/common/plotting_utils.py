@@ -1,0 +1,75 @@
+import numpy as np
+
+
+def gaussian(x: np.ndarray, amp: float, mu: float, sigma: float, offset: float) -> np.ndarray:
+    """
+    Args:
+        x : The input data points.
+        amp : Amplitude of the Gaussian.
+        mu : Mean of the Gaussian.
+        sigma : Standard deviation of the Gaussian.
+        offset : Offset of the Gaussian.
+    Returns:
+        np.ndarray: The Gaussian function evaluated at the input data points.
+    """
+    return amp * np.exp(-0.5 * ((x - mu) / sigma) ** 2) + offset
+
+
+def double_gaussian(
+    x: np.ndarray, amp1: float, center: float, sigma1: float, amp2: float, delta: float, sigma2: float, offset: float
+) -> np.ndarray:
+    """
+    Defined so we can control the distance between the two peaks of the double Gaussian.
+    Args:
+        x : The input data points.
+        amp1 : Amplitude of the first Gaussian.
+        center : Center of the double Gaussian.
+        sigma1 : Standard deviation of the first Gaussian.
+        amp2 : Amplitude of the second Gaussian.
+        delta : Distance between the centers of the two Gaussians.
+        sigma2 : Standard deviation of the second Gaussian.
+        offset : Offset of the double Gaussian.
+    Returns:
+        np.ndarray: The double Gaussian function evaluated at the input data points.
+    """
+    mu1 = center - delta / 2
+    mu2 = center + delta / 2
+    return amp1 * np.exp(-0.5 * ((x - mu1) / sigma1) ** 2) + amp2 * np.exp(-0.5 * ((x - mu2) / sigma2) ** 2) + offset
+
+
+def find_closest_index(array: np.ndarray, value: float) -> int:
+    """
+    Args:
+        array : The numpy array in which to find the closest index.
+        value : The value to which the closest index in the array is to be found.
+    Returns:
+        int: The index of the element in the array that is closest to the given value.
+    """
+    idx = np.argmin(np.abs(array - value))
+    return int(idx)
+
+
+def get_all_peaks():
+    """
+    Returns:
+        list: A list of all the peaks in the blue channel spectrum
+              used for wavelength calibration of the arcs.
+    """
+    return [
+        5769.6,
+        5460.735,
+        5085.822,
+        4916,
+        4358.328,
+        4198.317,
+        4158.59,
+        4077.837,
+        4046.563,
+        3906.371,
+        3663.279,
+        3650.153,
+        3610.5077,
+        3466.1996,
+        3261.0548,
+        3131.7,
+    ]
