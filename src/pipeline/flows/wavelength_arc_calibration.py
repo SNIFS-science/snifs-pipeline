@@ -1,47 +1,37 @@
+from pathlib import Path
+
 import numpy as np
 from scipy.optimize import curve_fit
 
-from pipeline.common.plotting_utils import double_gaussian, find_closest_index, gaussian, get_all_peaks
+from pipeline.common.log import get_logger
+from pipeline.common.plotting_utils import double_gaussian, find_closest_index, gaussian, get_wavelengths_to_fit
+from pipeline.tasks.loaders import load_images_from_file
 from pipeline.tasks.plotting.wavelength_arc_calibration_plots import plot_params, plot_refined_spectrum, plot_spectrum
 
-ALL_PEAKS = get_all_peaks()
+PEAKS_DICT = get_wavelengths_to_fit()
 
-INITIAL_PEAK_ESTIMATES = np.array(
-    [
-        [300, 390],
-        [400, 550],
-        [580, 640],
-        [641, 705],
-        [705, 770],
-        [880, 920],
-        [1000, 1100],
-        [1150, 1250],
-        [1400, 1448],
-    ]
-)
+NUMBER_OF_SPAXELS = 225
 
-INITIAL_WAVELENGTH_VALUES = np.array([5769.6, 5460.735, 5085.822, 4916, 4799.912, 4358.1, 4045.3, 3651.3, 3131.7])
-
-SPAXEL_NUMBER = 225
+ALL_PEAKS = PEAKS_DICT.keys()
 
 
-# TODO: all of these should be updated to have type hints np.ndarray
-# TODO: we should put some basic docstring for all common functions. googledoc style preferred.
-# TODO: make sure that the path is a path (not a string)
-def make_flux_array(linespread_file, spectrum_file):
+def make_flux_array(linespread_path: Path, arc_vector_file: Path) -> np.ndarray:
     """
     Creates a flux array by convolving the linespread function with the
     model-generated spectrum data.
     Args:
-        linespread_file : Linespread file.
-        spectrum_file : Arc vector file.
+        linespread_path : Path to the linespread file.
+        arc_vector_file : Path to the arc vector file.
     Returns:
         np.ndarray: The flux array.
     """
     big_arr = []
     # TODO: should check that the loaded file is the size we expect it to be otherwise will have problems
-    spectra = linespread_file.reshape(SPAXEL_NUMBER, -1)
-    for i in range(0, SPAXEL_NUMBER):
+    linespread_file = load_images_from_file(linespread_path)[0].data
+    spectra = linespread_file.reshape(NUMBER_OF_SPAXELS, -1)
+
+    spectrum_file = load_images_from_file(arc_vector_file)[0].data
+    for i in range(0, NUMBER_OF_SPAXELS):
         avg_cross = np.mean(spectrum_file[1400 * i : 1400 * i + 1], axis=0)
         spectrum = np.convolve(avg_cross, spectra[i])
         big_arr.append(spectrum)
@@ -50,7 +40,9 @@ def make_flux_array(linespread_file, spectrum_file):
 
 # double_range isn't the most robust way to do this. I think I should modify it so I can input a list of flags
 # the same length as centers that tells you what peak(s) should be treated as doubles
-def refine_peak_centers(spectrum: np.ndarray, centers: list, window: int = 10, double_range: tuple = (300, 400)):
+def refine_peak_centers(
+    spectrum: np.ndarray, centers: list, window: int = 10, double_range: tuple = (300, 400)
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Args:
         spectrum: The partially fit spectrum to refine by fitting Gaussians around emission lines.
@@ -100,11 +92,6 @@ def refine_peak_centers(spectrum: np.ndarray, centers: list, window: int = 10, d
             lower = [0.0, max(c - window, 0), 1e-6, 0.0, 1e-6, 1e-6, -np.inf]
             upper = [np.inf, min(c + window, len(spectrum) - 1), np.inf, np.inf, 4.0, np.inf, np.inf]
 
-            # Ensure p_0 is feasible (clip center into [lower,upper] etc.)
-            # TODO: this makes Sam sad.
-            # p_0_clipped = [
-            #     float(np.clip(p, l, u) if np.isfinite(u) else 1e12) for p, l, u in zip(p_0, lower, upper, strict=True)
-            # ]
             try:
                 popt, pcov = curve_fit(
                     double_gaussian, x_fit, y_fit, p0=parameter_guess, bounds=(lower, upper), maxfev=20000
@@ -166,33 +153,45 @@ def refine_peak_centers(spectrum: np.ndarray, centers: list, window: int = 10, d
                 new_centers.append(c)
                 fit_params.append(None)
 
-    return np.array(new_centers), fit_params
+    return np.array(new_centers), np.array(fit_params)
 
 
-def cal_spec(spectrum: np.ndarray, est_peaks: np.ndarray, wavelengths: np.ndarray) -> tuple:
-    # need to add a lot of robustness checks here
+def cal_spec(spectrum: np.ndarray, peaks_dict: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Args:
+        spectrum: The spectrum to calibrate.
+        peaks_dict: Dictionary of peak positions with wavelengths as the keys and values providing location info.
+    Returns:
+        np.ndarray: The calibrated wavelengths.
+        np.ndarray: The polynomial coefficients.
+        np.ndarray: The residuals squared.
+    """
+    # TODO: add a lot of robustness checks here
 
-    other_peaks = []
-    for peak in est_peaks:
-        a, b = peak
-        other_peaks.append(a + np.nanargmax(spec[a:b]))
-    other_new_centers, p = refine_peak_centers(spectrum, other_peaks, window=3)
+    improved_peaks = []
+    wavelengths = []
+    for peak in peaks_dict.keys():
+        if peaks_dict[peak].first_fit is True:
+            a, b = peaks_dict[peak].pixel_start_search, peaks_dict[peak].pixel_end_search
+            improved_peaks.append(a + np.nanargmax(spectrum[a:b]))
+            wavelengths.append(peaks_dict[peak].wavelength)
+    other_new_centers, p = refine_peak_centers(spectrum, improved_peaks, window=3)
     plot_refined_spectrum(spectrum, other_new_centers)
     x_points = np.array(range(len(spectrum)))
-    other_lbda = np.array(wavelengths)
-    p_3 = np.polyfit(other_new_centers, other_lbda, 3)
+    wavelengths_array = np.array(wavelengths)
+    p_3 = np.polyfit(other_new_centers, wavelengths_array, 3)
     wavelengths_cubic_fit = p_3[0] * x_points**3 + p_3[1] * x_points**2 + p_3[2] * x_points + p_3[3]
 
     fitted_centers_lbda = np.polyval(p_3, other_new_centers)
-    residuals = fitted_centers_lbda - other_lbda
+    residuals = fitted_centers_lbda - wavelengths_array
     return wavelengths_cubic_fit, p_3, residuals**2
 
 
-def recal_spec(spec, peaks, lbda):
+def recal_spec(spectrum, peak_guesses, corresponding_wavelengths) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     # this is the part that takes the longest time
-    other_new_centers, p = refine_peak_centers(spec, peaks, window=3)
-    x_points = np.array(range(len(spec)))
-    other_lbda = np.array(lbda)
+    other_new_centers, p = refine_peak_centers(spectrum, peak_guesses, window=3)
+    x_points = np.array(range(len(spectrum)))
+    other_lbda = np.array(corresponding_wavelengths)
     p_3 = np.polyfit(other_new_centers, other_lbda, 3)
     wavelengths_3 = p_3[0] * x_points**3 + p_3[1] * x_points**2 + p_3[2] * x_points + p_3[3]
 
@@ -201,73 +200,67 @@ def recal_spec(spec, peaks, lbda):
     return wavelengths_3, p_3, residuals**2
 
 
+def calibrate_wavelength_arc(arcPath: Path) -> np.ndarray:
+    """
+    Args:
+        arcPath: Path to the arc file to be calibrated.
+    Returns:
+        np.ndarray: The calibrated wavelength parameters.
+    """
+    logger = get_logger()
+    logger.info(f"Starting wavelength calibration for arc file: {arcPath}")
+
+    big_arr = make_flux_array(lineSpreadPath, arcVectorPath)
+    big_wave = []
+    params = []
+    residuals = []
+
+    for i in range(NUMBER_OF_SPAXELS):
+        spec = big_arr[i]
+        waves, ps, res = cal_spec(spec, PEAKS_DICT)
+        big_wave.append(waves)
+        params.append(ps)
+        residuals.extend(res)
+        logger.info("early RMS: ", np.sqrt(np.mean(residuals)))
+        logger.info("beginning refined fitting")
+        residuals = []
+        for i in range(big_arr.shape[0]):
+            spec = big_arr[i]
+            # figure out where we think the peaks are based on the previous fit, then refine them
+            closest_indices = [find_closest_index(big_wave[i], p) for p in ALL_PEAKS]
+            waves, ps, res = recal_spec(spec, closest_indices, ALL_PEAKS)
+            big_wave[i] = waves
+            params[i] = ps
+            residuals.extend(res)
+    params = np.array(params)
+    plot_params(params)
+    logger.info("late RMS: ", np.sqrt(np.mean(residuals)))
+    plot_spectrum(np.array(big_wave), big_arr)
+    # TODO: decide what we want to save and/or return
+    # np.save(f"{name}fit_wavelength_cal", big_wave)
+    logger.info(f"done with arc fits for {p.stem}")
+    return params
+
+
 # TODO: make the code in here a top level function (flow) with the entrypoint just calling that function
 # TODO: this top level function should take a pydantic configuration object so it can easily integrate with prefect
 if __name__ == "__main__":
-    # class WavelengthSearch(TypedDict):
-    #     wavelength_anstroms: float
-    #     pixel_start_search: int
-    #     pixel_end_search: int
+    base_dir = Path("/src/pipeline/output/")
+    files = [
+        base_dir / "runs/run_id=25_056_084/science_red.fits",  # TODO : update file name to actual arc file
+    ]
+    for file in files:
+        p = Path(file)
+        name = p.stem + "_"
+        # TODO: Where this file come from?
+        # TODO: We should pull the code that generates this file into this "flow"
+        lineSpreadPath = p.with_name(name + "line_spread.npy")
+        arcVectorPath = p.with_name(name + "fit_arc_vector.npy")
 
-    # class WavelengthSearch2(BaseModel):
-    #     wavelength_anstroms: float
-    #     pixel_start_search: int
-    #     pixel_end_search: int
+        # check that all the necessary files exist
+        assert Path(file).exists(), f"File {file} does not exist."
+        assert lineSpreadPath.exists(), f"File {lineSpreadPath} does not exist."
+        assert arcVectorPath.exists(), f"File {arcVectorPath} does not exist."
 
-    # @dataclass
-    # class WavelengthConfig:
-    #     wavelength_anstroms: float
-    #     pixel_start_search: int
-    #     pixel_end_search: int
-
-    # wavelengths_to_fit: dict[str, WavelengthSearch2] = {
-    #     "mercury_1": WavelengthSearch2(
-    #         wavelength_anstroms=5769.6,
-    #         pixel_start_search=300,
-    #         pixel_end_search=390,
-    #     )
-    # }
-
-    # I know you do this file selection stuff much better in preprocess_exposure
-    # TODO: NEVER USE OS ITS DISGUSTING TO ME
-    import os
-
-    # TODO: we should have the main function (flow) take in a specific arc file path
-    # TODO: and run over that - and we can loop through all the available arcs outside of the function
-    # TODO: in the name==main entrypoint
-    rootdir = "/home/anousha/snifs_model/"
-    for _subdir, dirs, _files in os.walk(rootdir):
-        for dire in dirs:
-            name = str(dire)
-            # TODO: boooooo for hardcoding this - we should try to stitch it into the preprocess output
-            if "P25_" in name and "B" in name:
-                print(f"wavelength calibrating {name}")
-                # TODO: Where this file come from?
-                # TODO: We should pull the code that generates this file into this "flow"
-                big_arr = make_flux_array(rootdir + name + "_crossSumFitArc", rootdir + name + "_fit_arc_vector.npy")
-                big_wave = []
-                params = []
-                residuals = []
-                # TODO: what is the first dim representing? ah - each spaxel
-                for i in range(big_arr.shape[0]):
-                    spec = big_arr[i]
-                    waves, ps, res = cal_spec(spec, INITIAL_PEAK_ESTIMATES, INITIAL_WAVELENGTH_VALUES)
-                    big_wave.append(waves)
-                    params.append(ps)
-                    residuals.extend(res)
-                print("early RMS: ", np.sqrt(np.mean(residuals)))
-                big_wave = np.array(big_wave)
-                print("refitting")
-                residuals = []
-                for i in range(big_arr.shape[0]):
-                    spec = big_arr[i]
-                    closest_indices = [find_closest_index(big_wave[i], p) for p in ALL_PEAKS]
-                    waves, ps, res = recal_spec(spec, closest_indices, ALL_PEAKS)
-                    big_wave[i] = waves
-                    params[i] = ps
-                    residuals.extend(res)
-                plot_params(np.array(params))
-                print("late RMS: ", np.sqrt(np.mean(residuals)))
-                plot_spectrum(big_wave, big_arr)
-                np.save(f"{name}fitWavelengthCal", big_wave)
-                print(f"done with {name}")
+        # config = PreprocessExposureConfig(primary_file=file)
+        calibrate_wavelength_arc(file)
