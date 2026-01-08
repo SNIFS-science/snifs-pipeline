@@ -3,42 +3,6 @@ from typing import TypedDict
 import numpy as np
 
 
-def gaussian(x: np.ndarray, amp: float, mu: float, sigma: float, offset: float) -> np.ndarray:
-    """
-    Args:
-        x : The input data points.
-        amp : Amplitude of the Gaussian.
-        mu : Mean of the Gaussian.
-        sigma : Standard deviation of the Gaussian.
-        offset : Offset of the Gaussian.
-    Returns:
-        np.ndarray: The Gaussian function evaluated at the input data points.
-    """
-    return amp * np.exp(-0.5 * ((x - mu) / sigma) ** 2) + offset
-
-
-def double_gaussian(
-    x: np.ndarray, amp1: float, center: float, sigma1: float, amp2: float, delta: float, sigma2: float, offset: float
-) -> np.ndarray:
-    """
-    Defined so we can control the distance between the two peaks of the double Gaussian.
-    Args:
-        x : The input data points.
-        amp1 : Amplitude of the first Gaussian.
-        center : Center of the double Gaussian.
-        sigma1 : Standard deviation of the first Gaussian.
-        amp2 : Amplitude of the second Gaussian.
-        delta : Distance between the centers of the two Gaussians.
-        sigma2 : Standard deviation of the second Gaussian.
-        offset : Offset of the double Gaussian.
-    Returns:
-        np.ndarray: The double Gaussian function evaluated at the input data points.
-    """
-    mu1 = center - delta / 2
-    mu2 = center + delta / 2
-    return amp1 * np.exp(-0.5 * ((x - mu1) / sigma1) ** 2) + amp2 * np.exp(-0.5 * ((x - mu2) / sigma2) ** 2) + offset
-
-
 def find_closest_index(array: np.ndarray, value: float) -> int:
     """
     Args:

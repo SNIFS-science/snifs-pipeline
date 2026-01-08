@@ -3,8 +3,9 @@ from pathlib import Path
 import numpy as np
 from scipy.optimize import curve_fit
 
+from pipeline.common.fitting_math__utils import double_gaussian, gaussian
 from pipeline.common.log import get_logger
-from pipeline.common.plotting_utils import double_gaussian, find_closest_index, gaussian, get_wavelengths_to_fit
+from pipeline.common.plotting_utils import find_closest_index, get_wavelengths_to_fit
 from pipeline.tasks.loaders import load_images_from_file
 from pipeline.tasks.plotting.wavelength_arc_calibration_plots import plot_params, plot_refined_spectrum, plot_spectrum
 
@@ -188,6 +189,16 @@ def cal_spec(spectrum: np.ndarray, peaks_dict: dict) -> tuple[np.ndarray, np.nda
 
 
 def recal_spec(spectrum, peak_guesses, corresponding_wavelengths) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Args:
+        spectrum: The spectrum to recalibrate.
+        peak_guesses: The guessed peak positions.
+        corresponding_wavelengths: The corresponding wavelengths for the guessed peaks.
+    Returns:
+        np.ndarray: The recalibrated wavelengths.
+        np.ndarray: The polynomial coefficients.
+        np.ndarray: The residuals squared.
+    """
     # this is the part that takes the longest time
     other_new_centers, p = refine_peak_centers(spectrum, peak_guesses, window=3)
     x_points = np.array(range(len(spectrum)))
@@ -210,32 +221,32 @@ def calibrate_wavelength_arc(arcPath: Path) -> np.ndarray:
     logger = get_logger()
     logger.info(f"Starting wavelength calibration for arc file: {arcPath}")
 
-    big_arr = make_flux_array(lineSpreadPath, arcVectorPath)
-    big_wave = []
+    flux_array = make_flux_array(lineSpreadPath, arcVectorPath)
+    wavelength_list = []
     params = []
     residuals = []
 
     for i in range(NUMBER_OF_SPAXELS):
-        spec = big_arr[i]
+        spec = flux_array[i]
         waves, ps, res = cal_spec(spec, PEAKS_DICT)
-        big_wave.append(waves)
+        wavelength_list.append(waves)
         params.append(ps)
         residuals.extend(res)
         logger.info("early RMS: ", np.sqrt(np.mean(residuals)))
         logger.info("beginning refined fitting")
         residuals = []
-        for i in range(big_arr.shape[0]):
-            spec = big_arr[i]
+        for i in range(flux_array.shape[0]):
+            spec = flux_array[i]
             # figure out where we think the peaks are based on the previous fit, then refine them
-            closest_indices = [find_closest_index(big_wave[i], p) for p in ALL_PEAKS]
+            closest_indices = [find_closest_index(wavelength_list[i], p) for p in ALL_PEAKS]
             waves, ps, res = recal_spec(spec, closest_indices, ALL_PEAKS)
-            big_wave[i] = waves
+            wavelength_list[i] = waves
             params[i] = ps
             residuals.extend(res)
     params = np.array(params)
     plot_params(params)
     logger.info("late RMS: ", np.sqrt(np.mean(residuals)))
-    plot_spectrum(np.array(big_wave), big_arr)
+    plot_spectrum(np.array(wavelength_list), flux_array)
     # TODO: decide what we want to save and/or return
     # np.save(f"{name}fit_wavelength_cal", big_wave)
     logger.info(f"done with arc fits for {p.stem}")

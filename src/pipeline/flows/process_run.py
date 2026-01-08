@@ -10,6 +10,7 @@ from pipeline.common.prefect_utils import pipeline_flow
 
 # from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
+from pipeline.flows.wavelength_arc_calibration import calibrate_wavelength_arc
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
 
@@ -70,10 +71,10 @@ async def process_run(conf: ProcessRunConfig) -> None:
 
     for arc in arc_exposures:
         if arc.channel == "B":
-            wavelength_calibration_config = WavelengthConfig(
-                arc_path=arc.output_path,
-            )
-            wavelength_arc_calibration(wavelength_calibration_config)
+            # wavelength_calibration_config = WavelengthConfig(
+            #    arc_path=arc.output_path,
+            # )
+            calibrate_wavelength_arc(Path(arc.output_path))
 
     # for file_entry in science_exposures:
     #     image = Image.from_asdf(file_entry.output_path)
