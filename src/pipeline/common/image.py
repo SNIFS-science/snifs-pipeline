@@ -1,4 +1,3 @@
-import inspect
 from pathlib import Path
 from typing import Any
 
@@ -6,15 +5,15 @@ import asdf
 import numpy as np
 from astropy.io import fits
 from astropy.table import Table
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
 
 from pipeline.common.headers import Headers
-from pipeline.common.lineage import Lineage
+from pipeline.common.lineage import Lineage, LineageMixin
 from pipeline.common.log import get_logger
 from pipeline.common.section import Section
 
 
-class Image(BaseModel):
+class Image(LineageMixin):
     """
     A class to hold the data and header of a FITS file.
     """
@@ -22,29 +21,10 @@ class Image(BaseModel):
     header: Headers
     data: np.ndarray
     variance: np.ndarray
-    lineage: list[Lineage] = []
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def add_function_lineage(self, summary: str) -> None:
-        """
-        Add a lineage step with the given summary and the name of the function that called this method.
-        """
-        logger = get_logger()
-        frame = inspect.currentframe()
-        assert frame is not None, "This method must be called from within a function"
-        assert frame.f_back is not None, "This method must be called from within a function"
-        function_name = frame.f_back.f_code.co_name
-        self.lineage.append(Lineage(title=function_name, summary=summary))
-        logger.info(summary)
-
-    def add_simple_lineage(self, title: str, summary: str) -> None:
-        self.lineage.append(Lineage(title=title, summary=summary))
-
-    def add_lineage(self, lineage: Lineage) -> None:
-        self.lineage.append(lineage)
-
-    def copy(self, type_coercion: np.dtype | type[Any] | None = None) -> "Image":
+    def copy(self, type_coercion: np.dtype | type[Any] | None = None) -> "Image":  # type: ignore
         image = Image(
             data=self.data.copy(),
             header=self.header.copy(),

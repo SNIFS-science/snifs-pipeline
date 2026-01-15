@@ -6,9 +6,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field, computed_field
 
 from pipeline.common.log import get_logger
-
-# from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.common.prefect_utils import create_markdown_artifact, pipeline_flow
+from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
 from pipeline.tasks.loaders import clear_directory, load_headers, load_images_from_file
@@ -92,29 +91,48 @@ class PreprocessSummary(BaseModel):
     observation_id: str | None = None
 
 
-# @registry.register(SnifsNerscDeploymentConfig(max_walltime=10 * 60, memory=4 * 1952))
+@registry.register(SnifsNerscDeploymentConfig(max_walltime=10 * 60, memory=4 * 1952))
 @pipeline_flow()
 def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     logger = get_logger()
 
+    # I'll overly comment this function so it acts as a reference for future flows.
+    # Please don't feel the need to put such verbose comments in future flows!
+
+    # Useful for when this flow is called by process_run and you don't want to preprocess over and over
+    # This should work fine right now, but if we wanted a better implementation, I'd be tempted to
+    # implement some common caching mechanism in the resolver or as a method on the config object itself
+    # that uses a hash (of the config) and checks that against the hash (which would be saved out) in
+    # the summary file.
     if conf.use_cache and conf.flow_summary_file.exists() and conf.output_image_file.exists():
         logger.info(f"Using cached preprocessed exposure at {conf.output_image_file}")
         return PreprocessSummary.model_validate_json(conf.flow_summary_file.read_text())
 
+    # These three lines I'd expect to be reusable almost everywhere. We get the descriptors
+    # for the primary file (like run_id, object name, channel, etc), log out the config so
+    # we know exactly how this flow is being run, and then log out the primary file metadata
     primary = conf.fetch_metadata(conf.primary_file)
     conf.initialise_and_log()
     logger.info(f"Primary file:\n{primary.model_dump_json(indent=2)}\n")
 
+    # These asserts are effectively just making sure the resolver was successful in turning
+    # the default unspecified attributres (as None) into actual file paths.
     assert primary.channel is not None, "Primary file must have a channel defined in the headers."
     assert conf.ccd_on_time_file is not None, "CCD on time file must be provided."
     assert conf.binary_offset_model_file is not None, "Binary offset model file must be provided."
     assert conf.dark_model_file is not None, "Dark model file must be provided."
 
+    # Now clearing some folders and loading the primary imae and headers we want to work with.
     clear_directory(conf.output_folder)
     clear_directory(conf.public_folder)
+    # Everything above this comment line could be mostly refactored into a common function to
+    # reduce duplicated code.
     images = load_images_from_file(conf.primary_file, transpose=True)
     primary_headers = load_headers(conf.primary_file)
 
+    # Here our actual algorithm begins. Each of these functions is designed to be fairly flat and
+    # operate on the images/image with similar signatures. This makes the code easier to read, and
+    # also a lot easier to test in isolation.
     if "time_on_seconds" not in primary_headers:
         primary_headers["time_on_seconds"] = determine_timeon(conf.ccd_on_time_file, primary_headers)
     images = split_and_standardise(images, primary.channel, primary_headers)
@@ -136,18 +154,26 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
         image = apply_custom_red_flat(image)
     image = remove_cosmic_rays(image)
 
+    # And now we have the boilerplate file output section, along with some extra diagnostic plots.
     image.header["level"] = "preprocess"
     image.to_asdf(conf.output_image_file)
     image.to_fits(conf.output_image_file.with_suffix(".fits"))
     conf.resolver.ensure_file_exists(conf.output_image_file)
-    # plot_bias_sections(primary, conf.public_folder)
-    # plot_detailed_images(primary, conf.public_folder)
+    plot_bias_sections(primary, conf.public_folder)
+    plot_detailed_images(primary, conf.public_folder)
 
+    # This summary could be removed if the pipeline database is done differently (replaced with an INSERT or API)
+    # but right now the purpose of this is get a file out that's got data mirrored in SQLite, which is what
+    # the streamlit dashboard (removed from repo, can find it in prior commits) uses.
     summary = summarise_image(image, primary, conf.output_summary_file, discriminator="preprocess_exposure")
     if "task_run_id" in summary:
         write_summary(conf.resolver, summary)
     del image
 
+    # This summary is what's returned by this flow. Notice that, because we might be passing from one node
+    # to another, a different slurm job, or in the future an entirely different server/HPC system, we're
+    # not returning massive data arrays, just simple json-serializable metadata about what was done,
+    # including the output file location so we can load it in downstream steps if needed.
     result = PreprocessSummary(
         source_path=str(conf.primary_file.resolve()),
         output_path=str(conf.output_image_file.resolve()),
@@ -160,6 +186,11 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
         observation_id=primary.observation_id,
     )
     conf.flow_summary_file.write_text(result.model_dump_json(indent=2))
+    # This markdown artifact step is used to regenerate the PreprocessSummary object for cached
+    # results, and to ensure we can pass this object back when invoking this flow via
+    # run_deployment (in prefect_utils.py) to parallelise this section.
+    # For an example in how to inline flows or run them via Prefect, see
+    # https://github.com/SNIFS-science/snifs-pipeline/blob/743f50af79cb46ce9ef301eb6e65cb695f657c22/src/pipeline/flows/process_run.py#L73
     create_markdown_artifact(f"""```json\n{result.model_dump_json(indent=2)}\n```""", key="result")
     return result
 
@@ -167,7 +198,6 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
 if __name__ == "__main__":
     raw_dir = Path(__file__).parents[3] / "data/level=raw"
     files = [
-        # raw_dir / "runs/run_id=25_194_024/25_194_024_004_03_B.fits",
         raw_dir / "runs/run_id=25_056_084/science_red.fits",
         # raw_dir / "runs/run_id=25_056_084/science_blue.fits",
         # raw_dir / "runs/run_id=25_057_001/continuum_red.fits",

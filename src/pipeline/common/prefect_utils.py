@@ -99,6 +99,8 @@ async def run_deployment(
                             logger = get_logger()
                             logger.info(f"Returning result artifact for flow run id {flow_run_id}")
                             logger.info(f"Artifact data is: {artifacts[0].data}")
+                            # Honestly I wish Prefect had a better way of doing this
+                            # Because right now assuming a JSON blob in a markdown artifact is kinda gross
                             return json.loads(
                                 str(artifacts[0].data).replace("```json", "").replace("```", "").replace("\n", "")
                             )
