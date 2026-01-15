@@ -77,6 +77,8 @@ class FileType(StrEnum):
     DARK = "DARK"
     BIAS_MODEL = "BIAS_MODEL"
     BIAS = "BIAS"
+    DEBUG_SUMMARY = "DEBUG_SUMMARY"
+    FLOW_SUMMARY = "FLOW_SUMMARY"
 
     @property
     def OptionalPath(self) -> type[Path | None]:

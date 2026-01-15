@@ -71,12 +71,12 @@ class PreprocessExposureConfig(FlowConfig):
     @computed_field
     @property
     def output_summary_file(self) -> Path:
-        return self.public_folder / f"{PipelineStage.PREPROCESSED.value}_summary.json"
+        return self.public_folder / f"{PipelineStage.PREPROCESSED.value}_type={FileType.DEBUG_SUMMARY.value}.json"
 
     @computed_field
     @property
     def flow_summary_file(self) -> Path:
-        return self.public_folder / f"{PipelineStage.PREPROCESSED.value}_flow_summary.json"
+        return self.public_folder / f"{PipelineStage.PREPROCESSED.value}_type={FileType.FLOW_SUMMARY.value}.json"
 
 
 class PreprocessSummary(BaseModel):

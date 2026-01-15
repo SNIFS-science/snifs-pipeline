@@ -24,7 +24,7 @@ def refresh_filestore(resolver: Resolver, refresh: bool = False) -> None:
         a
         for a in all_files
         if not a.is_dir()
-        and a.suffix in [".json", ".csv", ".fits", ".asdf", ".yml", ".yaml", ".logs.gz", ".parquet"]
+        and a.suffixes[0] in [".json", ".csv", ".fits", ".asdf", ".yml", ".yaml", ".parquet", ".logs"]
         and a.name not in [resolver.file_store_path.name, resolver.database_path.name]
     ]
     logger.info(f"Found {len(all_files)} files to resolve. Rebuilding the filestore.")
@@ -32,7 +32,6 @@ def refresh_filestore(resolver: Resolver, refresh: bool = False) -> None:
         path = file.resolve()
         detected_filepaths.append(str(path))
         if refresh or path not in analysed_files:
-            logger.info(f"Found new file: {path}")
             res = extract_file_details(file)
             if res is not None:
                 dfs.append(res)
