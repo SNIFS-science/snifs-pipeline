@@ -75,4 +75,4 @@ data/
 *.sqlite
 *.sqlite3
 
-! output/level=processed/type=CCD_ON_TIMES/times.parquet
+!output/level=processed/type=CCD_ON_TIMES/times.parquet

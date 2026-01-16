@@ -32,6 +32,5 @@ docker_prefect:
 prefect:
 	uv run prefect server start
 
-dashboard: export PYTHONPATH=src
-dashboard:
-	uv run streamlit run src/dashboard/Overview.py --server.port 8501
+docker_build:
+	docker buildx build --platform linux/amd64 -t snifs-pipeline:latest .

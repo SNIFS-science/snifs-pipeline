@@ -1,23 +1,23 @@
-# name: Publish Docker
-# on: [push]
-# jobs:
-#   build:
-#     runs-on: ubuntu-latest
-#     permissions:
-#       contents: read
-#       packages: write
-#       attestations: write
-#       id-token: write
-#     env:
-#       GIT_COMMIT_HASH: ${{ github.sha }}
-#     steps:
-#     - uses: actions/checkout@v3
-#     - name: Publish to Registry
-#       uses: elgohr/Publish-Docker-Github-Action@v5
-#       with:
-#         name: SNIFS-science/snifs-pipeline/image
-#         username: ${{ github.actor }}
-#         password: ${{ secrets.GITHUB_TOKEN }}
-#         registry: ghcr.io
-#         cache: true
-#         buildargs: GIT_COMMIT_HASH
+name: Publish Docker
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    env:
+      GIT_COMMIT_HASH: ${{ github.sha }}
+    steps:
+    - uses: actions/checkout@v3
+    - name: Publish to Registry
+      uses: elgohr/Publish-Docker-Github-Action@v5
+      with:
+        name: SNIFS-science/snifs-pipeline/image
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        registry: ghcr.io
+        cache: true
+        buildargs: GIT_COMMIT_HASH
