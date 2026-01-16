@@ -12,8 +12,7 @@ ENV UV_PROJECT_ENVIRONMENT=/usr/local/ \
     UV_LINK_MODE=copy \
     UV_FROZEN=1
 
-
-WORKDIR /src
+WORKDIR /app
 ENV GIT_REPO="https://github.com/SNIFS-science/snifs-pipeline"
 ENV GIT_COMMIT_HASH=$GIT_COMMIT_HASH
 
@@ -21,7 +20,12 @@ ENV GIT_COMMIT_HASH=$GIT_COMMIT_HASH
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-      uv sync --all-extras --frozen --no-dev
+      uv sync --all-extras --frozen --no-dev --no-install-project
 
-COPY src /src
-COPY .streamlit /src/.streamlit
+COPY . /app
+
+# Now we can install our own package and not ruin layer caching
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+      uv sync --all-extras --frozen --no-dev

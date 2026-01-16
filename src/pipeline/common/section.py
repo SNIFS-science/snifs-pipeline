@@ -1,8 +1,9 @@
 from pydantic import BaseModel, Field
 
 
-# add a named tuple for the section
 class Section(BaseModel):
+    """Represents a rectangular section of a 2D array (image)."""
+
     x_min: int
     x_max: int
     x_dir: int = Field(default=1)
@@ -34,7 +35,10 @@ class Section(BaseModel):
 
     @classmethod
     def from_str(cls, label: str) -> "Section":
-        """There is a header convention in fits files that defines a data range"""
+        """There is a header convention in fits files that defines a data range.
+
+        Its a stupid way of writing a section, e.g. '[1:2048,1:4096]', because
+        1-base indexing is a curse."""
         x_min, x_max, y_min, y_max = [int(i) for i in label[1:-1].replace(":", ",").split(",")]
         x_dir, y_dir = 1, 1
         if x_max < x_min:

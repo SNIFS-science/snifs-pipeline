@@ -1,7 +1,10 @@
+from collections.abc import Callable
 from typing import Any, ParamSpec, TypeVar
 
 from prefect import Flow
 from pydantic import BaseModel, Field
+
+from pipeline.common.log import get_logger
 
 
 class DeploymentConfig(BaseModel):
@@ -95,7 +98,16 @@ class Registry:
         self.deployments: list[tuple[Flow, DeploymentConfig]] = []
 
     def register(self, config: DeploymentConfig):
-        def decorator(func: Flow[P, R]) -> Flow[P, R]:
+        def decorator(func: Callable[P, R] | Flow[P, R]) -> Callable[P, R]:
+            if not isinstance(func, Flow):
+                logger = get_logger()
+                msg = (
+                    "Can only register Prefect Flows. You might be seeing this if you forgot to add "
+                    "@flow decorator, or if you've turned Prefect off in the global settings. "
+                    "Ignoring this registration."
+                )
+                logger.warning(msg)
+                return func
             self.deployments.append((func, config))
             return func
 

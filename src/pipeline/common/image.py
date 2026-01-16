@@ -1,75 +1,19 @@
-import inspect
 from pathlib import Path
-from typing import Any, Self
+from typing import Any
 
 import asdf
 import numpy as np
 from astropy.io import fits
 from astropy.table import Table
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import ConfigDict
 
 from pipeline.common.headers import Headers
-from pipeline.common.lineage import Lineage
+from pipeline.common.lineage import Lineage, LineageMixin
 from pipeline.common.log import get_logger
 from pipeline.common.section import Section
 
 
-# TODO: consider using something like the dataclass below for file IO to make your life easier down the line
-class CalibrationData(BaseModel):
-    header: Headers
-    wavelengths: np.ndarray
-    fluxes: np.ndarray
-    lineage: list[Lineage] = []
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @model_validator(mode="after")
-    def check_shapes(self) -> Self:
-        if self.wavelengths.shape != self.fluxes.shape:
-            raise ValueError(
-                f"Wavelengths and fluxes must have the same shape, got {self.wavelengths.shape} and {self.fluxes.shape}"
-            )
-        return self
-
-    @classmethod
-    def from_asdf(cls, asdf_file: Path | str) -> "CalibrationData":
-        if isinstance(asdf_file, str):
-            asdf_file = Path(asdf_file)
-        logger = get_logger()
-        logger.debug(f"Loading image from {asdf_file}")
-
-        with asdf.open(asdf_file) as af:
-            wavelengths = af["wavelengths"]
-            fluxes = af["fluxes"]
-            wavelengths._make_array()
-            fluxes._make_array()
-            header = Headers.from_dict(af["metadata"])
-            lineage = [Lineage(**lineage) for lineage in af["lineage"]]
-
-        return CalibrationData(wavelengths=wavelengths._array, fluxes=fluxes._array, header=header, lineage=lineage)
-
-    def to_asdf(self, asdf_file: Path | str) -> None:
-        if isinstance(asdf_file, str):
-            asdf_file = Path(asdf_file)
-        parent = asdf_file.parent
-        if not parent.exists():
-            parent.mkdir(parents=True, exist_ok=True)
-        logger = get_logger()
-        logger.debug(f"Saving image to {asdf_file}")
-
-        af = asdf.AsdfFile(
-            {
-                "metadata": self.header.to_dict(),
-                "wavelengths": self.wavelengths,
-                "fluxes": self.fluxes,
-                "lineage": [lineage.model_dump() for lineage in self.lineage],
-            }
-        )
-
-        af.write_to(asdf_file, all_array_compression="zlib", compression_kwargs={"level": 9})
-
-
-class Image(BaseModel):
+class Image(LineageMixin):
     """
     A class to hold the data and header of a FITS file.
     """
@@ -77,29 +21,10 @@ class Image(BaseModel):
     header: Headers
     data: np.ndarray
     variance: np.ndarray
-    lineage: list[Lineage] = []
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def add_function_lineage(self, summary: str) -> None:
-        """
-        Add a lineage step with the given summary and the name of the function that called this method.
-        """
-        logger = get_logger()
-        frame = inspect.currentframe()
-        assert frame is not None, "This method must be called from within a function"
-        assert frame.f_back is not None, "This method must be called from within a function"
-        function_name = frame.f_back.f_code.co_name
-        self.lineage.append(Lineage(title=function_name, summary=summary))
-        logger.info(summary)
-
-    def add_simple_lineage(self, title: str, summary: str) -> None:
-        self.lineage.append(Lineage(title=title, summary=summary))
-
-    def add_lineage(self, lineage: Lineage) -> None:
-        self.lineage.append(lineage)
-
-    def copy(self, type_coercion: np.dtype | type[Any] | None = None) -> "Image":
+    def copy(self, type_coercion: np.dtype | type[Any] | None = None) -> "Image":  # type: ignore
         image = Image(
             data=self.data.copy(),
             header=self.header.copy(),

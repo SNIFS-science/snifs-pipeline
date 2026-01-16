@@ -7,6 +7,8 @@ from pipeline.common.log import get_logger
 
 
 def listify[**P](func: Callable[Concatenate[Image, P], Image]) -> Callable[Concatenate[list[Image], P], list[Image]]:
+    """Convert a function that operates on a single Image to one that operates on a list of Images."""
+
     def inner(images: list[Image], *args, **kwargs) -> list[Image]:
         return [func(image, *args, **kwargs) for image in images]
 
@@ -15,6 +17,8 @@ def listify[**P](func: Callable[Concatenate[Image, P], Image]) -> Callable[Conca
 
 
 def flag_skip(key: str):
+    """Skips a pipeline task (to just return a copy) if the given key is set to True in the Image header."""
+
     def decorator[**P](func: Callable[P, Image]) -> Callable[P, Image]:
         # The first argument should be an Image instance from which we look at the header.
         @wraps(func)

@@ -10,6 +10,10 @@ VALID_TYPES = TypeVar("VALID_TYPES", str, bool, int, float, list[str], list[int]
 
 
 class Headers:
+    """Dictionary based metadata that's trying to distance itself
+    just a bit from FITS headers, but maintain compatibility.
+    """
+
     def __init__(self, **kwargs):
         self._headers = kwargs
         self._metrics: set[str] = set()
