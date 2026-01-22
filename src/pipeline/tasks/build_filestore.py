@@ -24,6 +24,7 @@ def refresh_filestore(resolver: Resolver, refresh: bool = False) -> None:
         a
         for a in all_files
         if not a.is_dir()
+        and len(a.suffixes) > 0
         and a.suffixes[0] in [".json", ".csv", ".fits", ".asdf", ".yml", ".yaml", ".parquet", ".logs"]
         and a.name not in [resolver.file_store_path.name, resolver.database_path.name]
     ]
