@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LogNorm
+from scipy import sparse
 
 from pipeline import settings
 from pipeline.common import get_logger
@@ -120,4 +121,86 @@ def plot_spectrum(wavelengths: np.ndarray, fluxes: np.ndarray) -> None:
     plt.close()
     output_location.chmod(0o644)  # Make the file readable by everyone
 
+    return
+
+
+def plot_fitting_check(fitModel: sparse.csr_matrix, imagea: np.ndarray) -> None:
+    """
+    Args:
+        fitModel: sparse matrix of fitted model data
+        imagea: numpy array of actual image data
+    Returns:
+        None
+    """
+    logger = get_logger()
+
+    if not settings.plot:
+        logger.info("Plotting is disabled. Skipping plot generation.")
+        return
+
+    flow_run_id = get_run_id()
+
+    notbadmodel = fitModel + 9  # to account for readout noise
+    difference = imagea - fitModel
+
+    chi2 = np.square(difference) / notbadmodel
+    logger.info("Chi^2 = ", np.sum(chi2))
+
+    for i in range(1000, 3000, 600):
+        plt.plot(imagea[i, :], label="data")
+        plt.plot(fitModel[i, :], label="model")
+        plt.plot(difference[i, :], label="data-model")
+        plt.fill_between(
+            np.arange(imagea[i, :].shape[0]),
+            np.sqrt(imagea[i, :] + 9),
+            -np.sqrt(imagea[i, :] + 9),
+            alpha=0.3,
+            color="C2",
+        )
+        plt.title(f"row {i} Both in first PV")
+        plt.legend()
+        output_location = (PUBLIC_PATH_MAP[flow_run_id] / f"spaxel_{i}_cut_through_{flow_run_id}.webp").resolve()
+        output_location.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Saving plot to {output_location}")
+        plt.tight_layout()
+        plt.savefig(output_location, dpi=600, bbox_inches="tight")
+        plt.close()
+        output_location.chmod(0o644)
+
+    plt.clf()
+
+    fig, ax = plt.subplots(2, 2)
+    im1 = ax[0][0].imshow(fitModel, cmap="plasma", aspect="auto")
+    fig.colorbar(im1, ax=ax[0][0])
+    ax[0][0].set_xlim(900, 1200)
+    ax[0][0].set_ylim(3500, 0)
+    ax[0][0].set_title("Model with 0-ed spaxel but including the read noise")
+    # plt.show()
+
+    im2 = ax[0][1].imshow(imagea, cmap="plasma", aspect="auto")
+    fig.colorbar(im2, ax=ax[0][1])
+    ax[0][1].set_xlim(900, 1200)
+    ax[0][1].set_ylim(3500, 0)
+    ax[0][1].set_title("Data")
+
+    im3 = ax[1][0].imshow(difference, cmap="plasma", aspect="auto", norm="symlog")
+    fig.colorbar(im3, ax=ax[1][0])
+
+    ax[1][0].set_xlim(900, 1200)
+    ax[1][0].set_ylim(3500, 0)
+    ax[1][0].set_title("Data -  Model")
+
+    im4 = ax[1][1].imshow(chi2, cmap="plasma", aspect="auto", norm="symlog")
+    fig.colorbar(im4, ax=ax[1][1])
+    ax[1][1].set_xlim(900, 1200)
+    ax[1][1].set_ylim(3500, 0)
+    ax[1][1].set_title("Chi2")
+
+    output_location = (PUBLIC_PATH_MAP[flow_run_id] / f"fitter_checking_{flow_run_id}.webp").resolve()
+    output_location.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Saving plot to {output_location}")
+    plt.tight_layout()
+    plt.savefig(output_location, dpi=600, bbox_inches="tight")
+    plt.close()
+    output_location.chmod(0o644)  # Make the file readable by everyone
     return

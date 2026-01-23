@@ -53,80 +53,21 @@ def gauss_2d(xy: tuple[np.ndarray, np.ndarray], x0: float, y0: float, a: float, 
     return a * np.exp(-((x - x0) ** 2 / w1**2 + (y - y0) ** 2 / w2**2))
 
 
-def quadratic(x: np.ndarray, a: float, b: float, c: float) -> np.ndarray:
+def func_2nd(x: np.ndarray, y: np.ndarray, a: float, b: float, c: float, d: float, e: float, f: float) -> np.ndarray:
     """
     Args:
-        x : The input data points.
-        a : Quadratic coefficient.
-        b : Linear coefficient.
-        c : Constant term.
-    Returns:
-        np.ndarray: The quadratic function evaluated at the input data points.
-    """
-    return a * x**2 + b * x + c
-
-
-def cubic(x: np.ndarray, a: float, b: float, c: float, d: float) -> np.ndarray:
-    """
-    Args:
-        x : The input data points.
-        a : Coefficient of x^3.
-        b : Coefficient of x^2.
-        c : Coefficient of x.
-        d : Constant term.
-    Returns:
-        np.ndarray: The cubic function evaluated at the input data points.
-    """
-    return a * x**3 + b * x**2 + c * x + d
-
-
-def quartic(x: np.ndarray, a: float, b: float, c: float, d: float, e: float) -> np.ndarray:
-    """
-    Args:
-        x : The input data points.
-        a : Coefficient of x^4.
-        b : Coefficient of x^3.
-        c : Coefficient of x^2.
-        d : Coefficient of x.
-        e : Constant term.
-    Returns:
-        np.ndarray: The quartic function evaluated at the input data points.
-    """
-    return a * x**4 + b * x**3 + c * x**2 + d * x + e
-
-
-def fifth_order(x: np.ndarray, a: float, b: float, c: float, d: float, e: float, f: float) -> np.ndarray:
-    """
-    Args:
-        x : The input data points.
-        a : Coefficient of x^5.
-        b : Coefficient of x^4.
-        c : Coefficient of x^3.
-        d : Coefficient of x^2.
-        e : Coefficient of x.
-        f : Constant term.
-    Returns:
-        np.ndarray: The 5th order polynomial function evaluated at the input data points.
-    """
-    return a * x**5 + b * x**4 + c * x**3 + d * x**2 + e * x + f
-
-
-def func_2nd(
-    xy: tuple[np.ndarray, np.ndarray], a: float, b: float, c: float, d: float, e: float, f: float
-) -> np.ndarray:
-    """
-    Args:
-        xy: Tuple of (x, y) coordinates.
+        x: x coordinates.
+        y: y coordinates.
         a, b, c, d, e, f: Coefficients for the 2nd order polynomial.
     Returns:
         The value of the 2nd order polynomial at the given (x, y) coordinates
     """
-    x, y = xy
     return a + b * x + c * y + d * x**2 + e * x * y + f * y**2
 
 
 def func_3rd(
-    xy: tuple[np.ndarray, np.ndarray],
+    x: np.ndarray,
+    y: np.ndarray,
     a: float,
     b: float,
     c: float,
@@ -140,17 +81,18 @@ def func_3rd(
 ) -> np.ndarray:
     """
     Args:
-        xy: Tuple of (x, y) coordinates.
+        x: x coordinates.
+        y: y coordinates.
         a, b, c, d, e, f, g, h, k, m: Coefficients for the 3rd order polynomial.
     Returns:
         The value of the 3rd order polynomial at the given (x, y) coordinates
     """
-    x, y = xy
     return a + b * x + c * y + d * x**2 + e * x * y + f * y**2 + g * x**3 + h * x**2 * y + k * x * y**2 + m * y**3
 
 
 def func_4th(
-    xy: tuple[np.ndarray, np.ndarray],
+    x: np.ndarray,
+    y: np.ndarray,
     a: float,
     b: float,
     c: float,
@@ -169,12 +111,11 @@ def func_4th(
 ) -> np.ndarray:
     """
     Args:
-        xy: Tuple of (x, y) coordinates.
+        x: x coordinates.
         a, b, c, d, e, f, g, h, k, m, n, o, p, q,r: Coefficients for the 4th order polynomial.
     Returns:
         The value of the 4th order polynomial at the given (x, y) coordinates
     """
-    x, y = xy
     return (
         a
         + b * x
@@ -218,10 +159,11 @@ def pseudo_voigt(
     return PV
 
 
-def core_2d(xy: tuple[np.ndarray, np.ndarray], x0: float, y0: float, a: float, w1: float, w2: float) -> np.ndarray:
+def core_2d(x: np.ndarray, y: np.ndarray, x0: float, y0: float, a: float, w1: float, w2: float) -> np.ndarray:
     """
     Args:
-        xy: Tuple of (x, y) coordinates.
+        x: x coordinates.
+        y: y coordinates.
         x0: Center position in x.
         y0: Center position in y.
         a: Amplitude of the pseudo-Voigt.
@@ -230,7 +172,6 @@ def core_2d(xy: tuple[np.ndarray, np.ndarray], x0: float, y0: float, a: float, w
     Returns:
         np.ndarray: The value of the 2D pseudo-Voigt at the given (x, y) coordinates.
     """
-    x, y = xy
     cross = pseudo_voigt(np.abs(x - x0), 0, 1.0 * w1, 1.6 * w1, 4.5, 0.1)  # + PV(x, 0, 1.2, 0.1, -n, 0.1,beta=0)
     spec = pseudo_voigt(np.abs(y - y0), 0, 1.0 * w2, 1.6 * w2, 4.5, 0.1)  # + PV(y, 0, 1.2, 0.2, -n, 0.1,beta=0)
     return a * cross * spec
