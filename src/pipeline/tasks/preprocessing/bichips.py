@@ -1,8 +1,7 @@
 import numpy as np
 
 from pipeline.common import Headers, Image, listify, pipeline_task
-from pipeline.tasks.plotting import plot
-from pipeline.tasks.plotting.plots import plot_standalone
+from pipeline.tasks.plotting import plot, plot_standalone
 
 GAINS = {
     "B": [0.773, 0.744],
