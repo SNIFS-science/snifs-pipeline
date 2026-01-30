@@ -54,7 +54,7 @@ line-length = 120
 target-version = "py313"
 
 [tool.ruff.lint]
-extend-select = ["F", "E", "W", "C", "I", "B", "T", "D", "DOC"]
+extend-select = ["F", "E", "W", "C", "I", "B", "T", "D", "DOC", "NPY"]
 extend-ignore = ["T201", "D10", "DOC201"]
 
 [tool.ruff.lint.extend-per-file-ignores]
