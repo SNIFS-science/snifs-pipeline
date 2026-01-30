@@ -26,8 +26,9 @@ def assemble_bichip_to_image(images: list[Image], primary_headers: Headers) -> I
     are extra pixels because there are extra pixels in the readout in the overscan region.
 
     This will also flip the R channel, as per bichip.cxx:283
-    """
 
+
+    """
     # Let's do some basic checks before assembling into a single chip
     data_secs = {image.header.get_str("DATASEC") for image in images}
     assert len(data_secs) == 1, f"All images must have the same DATASEC, got {data_secs}"
@@ -185,9 +186,16 @@ def standardise_r_images(images: list[Image], primary_headers: Headers) -> list[
 @plot()
 @pipeline_task()
 def split_and_standardise(images: list[Image], channel: str, primary_headers: Headers) -> list[Image]:
-    """Detcom (blue) comes in 2 extensions, one for each amplifier.
-    Otcom (red) has them together. We want them split. Additionally, various
-    parts of the headers for the upstream files are incorrect, and we need to override them here
+    """Splits out a combined bichip into two constituent chips.
+
+    Detcom (blue) comes in 2 extensions, one for each amplifier.
+    Otcom (red) has them together.
+
+    We want them split. Additionally, various parts of the headers for the
+    upstream files are incorrect, and we need to override them here.
+
+    Raises:
+        ValueError: If the channel is not 'B' or 'R'.
     """
     if channel == "B":
         return standardise_b_images(images, primary_headers)
@@ -200,7 +208,7 @@ def split_and_standardise(images: list[Image], channel: str, primary_headers: He
 @pipeline_task()
 @listify
 def handle_saturation(image: Image) -> Image:
-    """Handle saturation in the data
+    """Handle saturation in the data.
 
     The process is to look for readings above the saturation level, and then
     set their variance to infinity. Because saturation has a bleed, we also set

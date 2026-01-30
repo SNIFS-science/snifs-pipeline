@@ -14,9 +14,7 @@ from pipeline.common.section import Section
 
 
 class Image(LineageMixin):
-    """
-    A class to hold the data and header of a FITS file.
-    """
+    """A class to hold the data and header of a FITS file."""
 
     header: Headers
     data: np.ndarray
@@ -75,10 +73,7 @@ class Image(LineageMixin):
         return section, data, var
 
     def add(self, image: "Image", scale: float = 1.0) -> "Image":
-        """
-        Add another image to this one, scaling the data by the given scale factor.
-        """
-
+        """Add another image to this one, scaling the data by the given scale factor."""
         if self.data.shape != image.data.shape:
             logger = get_logger()
             logger.warning(f"Image shapes do not match: {self.data.shape} vs {image.data.shape}")
@@ -111,9 +106,7 @@ class Image(LineageMixin):
         variance: np.ndarray,
         lineage: list[Lineage] | None = None,
     ) -> "Image":
-        """
-        Create a DataHeader from an array and a dictionary.
-        """
+        """Create a DataHeader from an array and a dictionary."""
         if isinstance(header, dict):
             header = Headers.from_dict(header)
         return Image(data=data, header=header, variance=variance, lineage=lineage or [])

@@ -179,7 +179,7 @@ def find_closest_index(array, value):
 
 def recalc_spec(spec, peaks, lbda):
     # this is the part that takes the longest time
-    other_new_centers, p = refine_peak_centers(spec, peaks, window=3)
+    other_new_centers, _ = refine_peak_centers(spec, peaks, window=3)
     x_points = np.array(range(len(spec)))
     other_lbda = np.array(lbda)
     p_3 = np.polyfit(other_new_centers, other_lbda, 3)
