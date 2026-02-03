@@ -53,11 +53,14 @@ READOUT_NOISE = 3.0
 
 
 def psf_calculation(sum_along_cross_disp: np.ndarray) -> np.ndarray:
-    """
+    """Calculate the psf.
+
     Args:
         sum_along_cross_disp: numpy array of summed cross-dispersion profile for one spec element
+
     Returns:
-        line profile function: adjusted cross-dispersion profile of length 100"""
+        line profile function: adjusted cross-dispersion profile of length 100
+    """
     if len(sum_along_cross_disp) != 100:
         toAppend = np.zeros(100)
         toAppend[: len(sum_along_cross_disp)] = sum_along_cross_disp
@@ -66,12 +69,12 @@ def psf_calculation(sum_along_cross_disp: np.ndarray) -> np.ndarray:
 
 
 def save_results(data: np.ndarray, filename: str) -> None:
-    """
+    """Wrapper save results function.
+
     Args:
         data: numpy array of residuals to save
         filename: name of the file to save the data to
-    Returns:
-        None"""
+    """
     logger = get_logger()
     flow_run_id = get_run_id()
 
@@ -81,14 +84,13 @@ def save_results(data: np.ndarray, filename: str) -> None:
 
 
 def save_shift_results(data: np.ndarray, spaxel: int, is_translational_shift: bool) -> None:
-    """
+    """Save the results of the shift we wanted to apply to the big matrix.
+
     Args:
         data: numpy array of residuals to save
         spaxel: spaxel number
-        isTranslationalShift: whether the data corresponds to translational shifts or width shifts
-    Returns:
-        None"""
-
+        is_translational_shift: whether the data corresponds to translational shifts or width shifts
+    """
     if is_translational_shift:
         shift_type = "translational"
     else:
@@ -104,15 +106,17 @@ def make_matrix(
     partial: bool = True,
     oversample_factor: int = 1,
 ) -> sparse.csr_matrix:
-    """
+    """Makes the big matrix.
+
     Args:
-        spaxel (int): spaxel number that will be adjusted (shifted or widened)
-        offsets (np.ndarray): array of extra offsets in cross-dispersion direction for all spaxels (225,)
+        spaxel: spaxel number that will be adjusted (shifted or widened)
+        offsets: array of extra offsets in cross-dispersion direction for all spaxels (225,)
             defaults to zeros
-        widths (np.ndarray): array of width scaling factors for all spaxels (225,)
+        widths: array of width scaling factors for all spaxels (225,)
             defaults to a multiplier of 1
-        partial (bool, optional): whether to compute only a subset of the matrix. Defaults to False.
-        oversample_factor (int, optional): oversampling factor for the model. Defaults to 1.
+        partial (optional): whether to compute only a subset of the matrix. Defaults to False.
+        oversample_factor (optional): oversampling factor for the model. Defaults to 1.
+
     Returns:
         sparse.csr_matrix: sparse matrix representing the shifted model
     """
@@ -184,8 +188,8 @@ def make_matrix(
             xv_sub_mono = xv_sub[c0:c1, d0:d1]
             yv_sub_mono = yv_sub[c0:c1, d0:d1]
 
-            #################  make the model ###############
-            popt = [0, 0]  ## a way to allow for a shift.
+            # make the model ###############
+            popt = [0, 0]  # a way to allow for a shift.
             # redefine x and y
             y = yv_sub_mono.T[0] - spec_element
             x = xv_sub_mono[0] - curve[spec_element]
@@ -255,14 +259,15 @@ def make_matrix(
 
 
 def calculate_residuals(fitModel: sparse.csr_matrix, imagea: np.ndarray, heights: np.ndarray) -> np.ndarray:
-    """
+    """Calculate the residuals for the fit array compared to the data.
+
     Args:
         fitModel: sparse matrix of fitted model data
         imagea: numpy array of actual image data
         heights: numpy array defining height bins
     Returns:
-        numpy.ndarray: array of normalized chi-squared values per height bin including readout noise
-    """
+        numpy.ndarray: array of normalized chi-squared values per height bin including readout noise.
+    """  # noqa: D205, D212
     logger = get_logger()
     norms = []
     notbadmodel = fitModel + READOUT_NOISE**2  # also avoids division by zero
@@ -286,16 +291,18 @@ def fit(
     partial: bool = True,
     num_height_bins: int = 256,
 ) -> np.ndarray:
-    """
+    """Fit the matrix and get the resulting data vector.
+
     Args:
         matrix: sparse matrix representing the model
         data_image: Path to the preprocessed data image file
-        spectrum_path: full spectrum, needs to be concatenated
+        spectrum: full spectrum, needs to be concatenated
         spaxel: spaxel number being processed
         partial: whether the matrix is partial or full
         num_height_bins: number of height bins to calculate residuals for
     Returns:
-        numpy.ndarray: array of normalized chi-squared values per height bin"""
+        numpy.ndarray: array of normalized chi-squared values per height bin.
+    """  # noqa: D205
     assert 4096 % num_height_bins == 0, "num_height_bins must be a factor of 4096"
     data_to_fit_to = load_images_from_file(data_image)[0].data
     if partial:
@@ -334,7 +341,7 @@ def fit(
     # do the final fit using scipy
     from scipy.sparse.linalg import lsqr
 
-    fit_vector, istop, itn, normr = lsqr(matrix, fl)[:4]
+    fit_vector, _, _, _ = lsqr(matrix, fl)[:4]
     if not partial:
         save_results(fit_vector, f"fit_vector_{flow_run_id}.npy")
     stop = time.time()
@@ -360,16 +367,17 @@ def shifting_spaxel(
     oversample_factor: int = 1,
     is_partial: bool = True,
 ) -> sparse.csr_matrix:
-    """
-    Args:
+    """Args:
         spaxel: spaxel number to shift
         shift: amount to shift (either translational or width)
         isTranslationalShift: whether to apply translational shifts or width shifts
         translational_params: array of translational shift parameters. Defaults to default_shift_offsets.
         width_params: array of width shift parameters. Defaults to default_width_offsets.
         oversample_factor: oversampling factor for the model. Defaults to 1.
+
     Returns:
-        sparse.csr_matrix: shifted sparse matrix"""
+        sparse.csr_matrix: shifted sparse matrix.
+    """  # noqa: D205
     os = translational_params
     ws = width_params
     if isTranslationalShift:
@@ -389,16 +397,14 @@ def repeat_shift_fit(
     width_params: np.ndarray = default_width_offsets,
     oversample_factor: int = 1,
 ) -> None:
-    """
-    Args:
-        spaxels: list of spaxel numbers to process, must be between 0 and 224
+    """Args:
+    spaxels: list of spaxel numbers to process, must be between 0 and 224
         shifts: list of shifts to apply (either translational or widths)
         is_translational_shift: whether to apply translational shifts or width shifts
         translational_params: array of translational shift parameters. Defaults to default_shift_offsets.
         width_params: array of width shift parameters. Defaults to default_width_offsets.
         oversample_factor: oversampling factor for the model. Defaults to 1.
-    Returns:
-        None"""
+    """  # noqa: D205
     assert all((s < 225 and s >= 0) for s in spaxels), "spaxel numbers must be between 0 and 224"
     if not is_translational_shift:
         assert all(shift > 0 for shift in shifts), "all width shifts must be positive"

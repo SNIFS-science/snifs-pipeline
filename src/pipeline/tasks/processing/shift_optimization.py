@@ -33,7 +33,7 @@ def find_ideal_shift(spaxel_ID: int, is_translational_shift: bool) -> tuple[np.n
 
         # p = np.polyfit(xPoints[:],yPoints[:],2)
         try:
-            p, cov = curve_fit(shifted_cosh, xPoints, yPoints)
+            p, _ = curve_fit(shifted_cosh, xPoints, yPoints)
 
             for x in xVals:
                 yVals.append(shifted_cosh(x, *p))
@@ -68,7 +68,7 @@ def shift_and_save(spaxel_list: list[int], is_translational_shift: bool, polynom
         med = np.nanmedian(minima)
         mask = (~np.isnan(minima)) & (np.abs(minima - med) <= 0.5 * np.abs(med))
         poly_object = Polynomial.basis(polynomial_order)
-        params, param_cov = curve_fit(poly_object, xRange[mask], np.array(minima)[mask])
+        params, _ = curve_fit(poly_object, xRange[mask], np.array(minima)[mask])
         oldShift[spaxel_ID] = params
     if is_translational_shift:
         shift_type = "translational"
@@ -89,8 +89,8 @@ if __name__ == "__main__":
 
     image_dict = {}
     for file in [
-        "generated_image_no_oversample.fits",
-        "model_generated_image.fits",
+        # "generated_image_no_oversample.fits",
+        # "model_generated_image.fits",
         "model_generated_image_no_oversample.fits",
     ]:
         try:

@@ -13,17 +13,20 @@ from pipeline.common.prefect_utils import create_image_artifact
 from pipeline.tasks.plotting.plots import (
     add_callout_rectangle,
     add_colorbar,
-    add_section_rectangle,
+    add_midlines,
+    add_ticks,
     convert_path_to_url,
     extract_zoom,
 )
 
 
 def find_closest_index(array: np.ndarray, value: float) -> int:
-    """
+    """Finding the closest index to the given points.
+
     Args:
         array : The numpy array in which to find the closest index.
         value : The value to which the closest index in the array is to be found.
+
     Returns:
         int: The index of the element in the array that is closest to the given value.
     """
@@ -32,7 +35,8 @@ def find_closest_index(array: np.ndarray, value: float) -> int:
 
 
 def get_all_peaks():
-    """
+    """Get all the peaks for the blue emission lines.
+
     Returns:
         list: A list of all the peaks in the blue channel spectrum
               used for wavelength calibration of the arcs.
@@ -183,7 +187,7 @@ def get_wavelengths_to_fit() -> dict[float, WavelengthSearch]:
     return wavelengths_to_fit
 
 
-ZOOM_START = (1000, 2000)  # (1000, 509 - 25)
+ZOOM_START = (2048 - 25, 1024 - 25)  # (1000, 509 - 25)
 ZOOM_SIZE = (50, 50)
 ZOOM_END = (ZOOM_START[0] + ZOOM_SIZE[0], ZOOM_START[1] + ZOOM_SIZE[1])
 MIDLINE_X_COORD = ZOOM_START[0] + ZOOM_SIZE[0] // 2
@@ -278,7 +282,7 @@ def plot_new_to_old_comparison(image_dict, output_path: Path, start: str | None 
             # add_colorbar(f"{label} Variance", fig, ax_variance, imv)
 
             imdz = ax_data_zoom.imshow(
-                extract_zoom(data, zoom_start=ZOOM_START), cmap=CMAP_ZOOM, aspect="auto", **im_kw
+                extract_zoom(data, zoom_start=ZOOM_START, zoom_size=ZOOM_SIZE), cmap=CMAP_ZOOM, aspect="auto", **im_kw
             )
             add_colorbar(f"Zoomed {label} Data", fig, ax_data_zoom, imdz, height=0.04)
 
@@ -287,7 +291,7 @@ def plot_new_to_old_comparison(image_dict, output_path: Path, start: str | None 
             # Line plots
             kwargs = {"lw": 0.3, "alpha": 0.7}
             y_lim_percentages = [1, 99]
-            for ax, sec in [(axxdl, data)]:  # , (axxvl, variance)]:
+            for ax, sec in [(axxdl, data)]:
                 for location, colour in LINES_X.items():
                     ax.plot(sec[location, :], color=colour, **kwargs)
                 dx = sec[list(LINES_X.keys()), :]
@@ -309,12 +313,12 @@ def plot_new_to_old_comparison(image_dict, output_path: Path, start: str | None 
                     ax.set_ylim(*np.nanpercentile(combined, y_lim_percentages))
 
             # for ax in (ax_data, ax_variance):
-            ax = ax_data
+            ax = ax_data  # for each image in the first row
             if ax:
-                add_callout_rectangle(ax, zoom_start=ZOOM_START)
-                if idx < 2 and "BIASSEC" in images[idx].header:
-                    bias_section = images[idx].get_bias_section()[0]
-                    add_section_rectangle(ax, bias_section, edgecolor="#38bdf8", linestyle=":")
+                add_callout_rectangle(ax, zoom_start=ZOOM_START, zoom_size=ZOOM_SIZE)
+                add_ticks(ax, LINES_X, axis="x", reach=0.02)
+                add_ticks(ax, LINES_Y, axis="y", reach=0.05)
+                add_midlines(ax, zoom_end=ZOOM_END, zoom_start=ZOOM_START)
 
             for ax in (ax_data, ax_data_zoom):  # (ax_data, ax_variance, ax_data_zoom, ax_variance_zoom):
                 ax.set_xticks([])

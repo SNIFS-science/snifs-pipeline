@@ -181,7 +181,7 @@ def cal_spec(spectrum: np.ndarray, peaks_dict: dict) -> tuple[np.ndarray, np.nda
             a, b = peaks_dict[peak].pixel_start_search, peaks_dict[peak].pixel_end_search
             improved_peaks.append(a + np.nanargmax(spectrum[a:b]))
             wavelengths.append(peaks_dict[peak].wavelength)
-    other_new_centers, p = refine_peak_centers(spectrum, improved_peaks, window=3)
+    other_new_centers, _ = refine_peak_centers(spectrum, improved_peaks, window=3)
     plot_refined_spectrum(spectrum, other_new_centers)
     x_points = np.array(range(len(spectrum)))
     wavelengths_array = np.array(wavelengths)
@@ -205,7 +205,7 @@ def recal_spec(spectrum, peak_guesses, corresponding_wavelengths) -> tuple[np.nd
         np.ndarray: The residuals squared.
     """  # noqa: D205
     # this is the part that takes the longest time
-    other_new_centers, p = refine_peak_centers(spectrum, peak_guesses, window=3)
+    other_new_centers, _ = refine_peak_centers(spectrum, peak_guesses, window=3)
     x_points = np.array(range(len(spectrum)))
     other_lbda = np.array(corresponding_wavelengths)
     p_3 = np.polyfit(other_new_centers, other_lbda, 3)
