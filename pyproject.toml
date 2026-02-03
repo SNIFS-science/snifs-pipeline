@@ -54,11 +54,14 @@ line-length = 120
 target-version = "py313"
 
 [tool.ruff.lint]
-extend-select = ["F", "E", "W", "C", "I", "B", "T"]
-extend-ignore = ["T201"]
+extend-select = ["F", "E", "W", "C", "I", "B", "T", "D", "DOC", "NPY"]
+extend-ignore = ["T201", "D10", "DOC201"]
 
 [tool.ruff.lint.extend-per-file-ignores]
 "__init__.py" = ["F401"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.prefect]
 logging.level = "INFO"

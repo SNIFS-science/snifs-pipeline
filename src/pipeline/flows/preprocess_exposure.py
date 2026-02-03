@@ -198,14 +198,15 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
 if __name__ == "__main__":
     raw_dir = Path(__file__).parents[3] / "data/level=raw"
     files = [
-        raw_dir / "runs/run_id=25_056_084/science_red.fits",
+        # raw_dir / "runs/run_id=25_056_084/science_red.fits",
         # raw_dir / "runs/run_id=25_056_084/science_blue.fits",
         # raw_dir / "runs/run_id=25_057_001/continuum_red.fits",
         # raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",
         # raw_dir / "runs/run_id=25_121_118/bias_red.fits",
         # raw_dir / "runs/run_id=25_159_030/continuum_red.fits",
+        raw_dir / "runs/run_id=25_291_007/25_291_007_001_17_B.fits",
     ]
     for file in files:
         assert Path(file).exists(), f"File {file} does not exist."
-        config = PreprocessExposureConfig(primary_file=file)
+        config = PreprocessExposureConfig(primary_file=file, use_cache=False)
         preprocess_exposure(config)

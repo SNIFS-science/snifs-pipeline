@@ -10,8 +10,10 @@ VALID_TYPES = TypeVar("VALID_TYPES", str, bool, int, float, list[str], list[int]
 
 
 class Headers:
-    """Dictionary based metadata that's trying to distance itself
-    just a bit from FITS headers, but maintain compatibility.
+    """Dictionary based metadata.
+
+    We're trying to distance ourselves just a bit from FITS headers,
+    but maintain compatibility via dictionary-style metadata.
     """
 
     def __init__(self, **kwargs):
@@ -51,9 +53,7 @@ class Headers:
         value: VALID_TYPES,
         metric: bool = False,
     ) -> None:
-        """
-        Set a header key to a value.
-        """
+        """Set a header key to a value."""
         key = key.lower()
         self[key] = value
         if metric:
@@ -138,9 +138,7 @@ class Headers:
         return value
 
     def set_default(self, defaults: dict[str, VALID_TYPES]) -> None:
-        """
-        Set default values in the header.
-        """
+        """Set default values in the header."""
         logger = get_logger()
         for key, value in defaults.items():
             if key not in self._headers:
@@ -148,14 +146,18 @@ class Headers:
                 logger.debug(f"Header {key} was not set. Setting to default: {value}")
 
     def get_metric_keys(self) -> "set[str]":
-        """
-        Get the keys that are metrics.
+        """Get the keys that are metrics.
+
+        Returns:
+            A set of keys that are marked as metrics.
         """
         return self._metrics
 
     def get_metrics(self, lowercase: bool = True) -> dict[str, VALID_TYPES]:
-        """
-        Get the metrics in the header.
+        """Get the metrics in the header.
+
+        Returns:
+            A dictionary of metrics labels mapped to their values.
         """
         metrics = {k: v for k, v in self.items() if k in self._metrics}
         if lowercase:
@@ -164,9 +166,7 @@ class Headers:
 
     @classmethod
     def merge_all(cls, *headers: "Headers") -> "Headers":
-        """
-        Merge all headers into one.
-        """
+        """Merge all headers into one."""
         logger = get_logger()
         result = Headers()
         for header in headers:
@@ -182,9 +182,7 @@ class Headers:
         return result
 
     def merge(self, other: "Headers") -> "Headers":
-        """
-        Merge another header into this one.
-        """
+        """Merge another header into this one."""
         original = self._headers.copy()
         for key, value in other.items():
             original[key] = value
@@ -194,15 +192,11 @@ class Headers:
         return Headers(**self._headers)
 
     def to_dict(self) -> dict[str, VALID_TYPES]:
-        """
-        Convert the header to a dictionary.
-        """
+        """Convert the header to a dictionary."""
         return {k: v for k, v in self.items() if v is not None}
 
     def to_astropy_header(self) -> Header:
-        """
-        Convert the header to an Astropy Header.
-        """
+        """Convert the header to an Astropy Header."""
 
         def add_value(header: Header, key: str, value: VALID_TYPES) -> None:
             # FITS headers cannot be lists. So we append 1,2,3, etc to the end of the key
@@ -231,9 +225,7 @@ class Headers:
 
     @classmethod
     def from_dict(cls, data: dict[str, str | bool | int | float | list[str] | list[int] | list[float]]) -> "Headers":
-        """
-        Create a Headers object from a dictionary.
-        """
+        """Create a Headers object from a dictionary."""
         return Headers(**data)
 
     @classmethod

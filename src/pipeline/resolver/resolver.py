@@ -91,8 +91,10 @@ class Resolver(BaseModel):
         df.sort("file_path").write_parquet(self.file_store_path)
 
     def get_file_metadata(self, file_path: Path | str) -> FileStoreEntry:
-        """
-        Get the metadata for a file.
+        """Get the metadata for a file.
+
+        Raises:
+            FileNotFoundError: If the file is not found in the file store.
         """
         if isinstance(file_path, str):
             file_path = Path(file_path)
@@ -113,9 +115,7 @@ class Resolver(BaseModel):
         file_type: str | FileType,
         primary: FileStoreEntry | str | Path | None,
     ) -> FileStoreEntry:
-        """
-        Get a single match for a file type.
-        """
+        """Get a single match for a file type."""
         if isinstance(file_type, FileType):
             file_type = file_type.value
         if isinstance(primary, str):
@@ -136,9 +136,7 @@ class Resolver(BaseModel):
         file_type: str | FileType,
         primary: FileStoreEntry | str | Path | None = None,
     ) -> list[FileStoreEntry]:
-        """
-        Get all matches for a file type.
-        """
+        """Get all matches for a file type."""
         if isinstance(file_type, FileType):
             file_type = file_type.value
         if isinstance(primary, str):
@@ -152,9 +150,7 @@ class Resolver(BaseModel):
         file_type: str | FileType,
         primary: FileStoreEntry | str | Path | None = None,
     ) -> list[Path]:
-        """
-        Get all match paths for a file type.
-        """
+        """Get all match paths for a file type."""
         return [self.data_path / match.file_path for match in self.get_matches(file_type, primary)]
 
 

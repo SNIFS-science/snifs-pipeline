@@ -104,7 +104,7 @@ def subtract_bias(image: Image, reference: Image | DarkModel) -> Image:
 
 
 def subtract_bias_model(image: Image, model: DarkModel) -> Image:
-    """Subtracts bias model following imagesnifs.cxx:298"""
+    """Subtracts bias model following imagesnifs.cxx:298 code."""
     detector_temp = image.header.get_float("detector_temperature")
     time_on_str = image.header.get_optional_str("time_on_seconds")
     time_on = float(time_on_str) if time_on_str is not None and "." in time_on_str else None

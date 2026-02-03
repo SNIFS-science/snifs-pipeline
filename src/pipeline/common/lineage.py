@@ -17,9 +17,7 @@ def get_git_repo() -> str:
 
 @lru_cache()
 def get_git_commit() -> str:
-    """
-    Get the current git commit hash.
-    """
+    """Get the current git commit hash."""
     if "GIT_COMMIT_HASH" in os.environ:
         return os.environ["GIT_COMMIT_HASH"]
     try:
@@ -43,9 +41,7 @@ class LineageMixin(BaseModel):
     lineage: list[Lineage] = Field(default_factory=list, description="Lineage of processing steps applied to the data")
 
     def add_function_lineage(self, summary: str) -> None:
-        """
-        Add a lineage step with the given summary and the name of the function that called this method.
-        """
+        """Add a lineage step with the given summary and the name of the function that called this method."""
         logger = get_logger()
         frame = inspect.currentframe()
         assert frame is not None, "This method must be called from within a function"

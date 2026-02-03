@@ -14,8 +14,14 @@ from pipeline.tasks.plotting.plots import plot_standalone
 @listify
 @flag_skip("OEPARAM")
 def correct_even_odd(image: Image) -> Image:
-    """The odd-even effect is touched on in Emmanual Gangler's thesis, section 3.3.2
-    which you can find in the docs/pdfs folder in this repository."""
+    """Corrects images for the odd-even effect.
+
+    The odd-even effect is touched on in Emmanual Gangler's thesis, section 3.3.2
+    which you can find in the docs/pdfs folder in this repository.
+
+    Returns:
+        The even-odd corrected image.
+    """
     image = image.copy()
     # TODO: It would be good to actually test this in case the "S->XFirst()" is a 0 or 1
     # TODO: to make sure we're not applying the odd-even the wrong way around.
@@ -77,6 +83,15 @@ def add_overscan_variance(image: Image) -> Image:
 @listify
 @flag_skip("overscan_done")
 def subtract_offset(image: Image) -> Image:
+    """Subtracts the overscan offset from the image.
+
+    This function follows the algorithm in overscan.cxx from original
+    SNIFS pipeline, where the meat of the original code can be found at
+    https://gitlab.com/BastianQuerner/snifs-reduction/-/blob/v1/CVS_Software/snifu/Ccd/pkg/preprocess/lib/overscan.cxx?ref_type=heads#L556.
+
+    Returns:
+        The overscan corrected image.
+    """
     image = image.copy()
     # ComputeLinesMean from overscan.cxx:202 iterates over every Y value
     # in the bias section and sums across X axis to compute the mean
@@ -95,7 +110,7 @@ def subtract_offset(image: Image) -> Image:
     offset_edge = np.insert(offset_centre[1:], offset_centre.size - 1, offset_centre[-1])
 
     # If interpolating, we're really interpolating from one bias section midpoint to the next.
-    # Ie if the midpoint was 80% of the way through, [xxxxxxxMxx] then out lerp (uncaring about points in the
+    # Ie if the midpoint was 80% of the way through, [xxxxxxxMxx] then our lerp (uncaring about points in the
     # the biassec after the midpoint) would be: [0.2 ... 1.0, 1.0, 1.0]
     # This is because the offset_centre is defined from the middle of the bias section, not the edge of the CCD
     # So if the middle of the bias section represents 90% of the way through the row, we'd want want to use
@@ -118,7 +133,7 @@ def subtract_offset(image: Image) -> Image:
 
     # There are some header value shenanigans in overscan.cxx:585 that I replicate
     # with minimal understanding.
-    if image.header.get_optional_str("file_type") != "BIAS":  #! TODO: this negation confuses me
+    if image.header.get_optional_str("file_type") != "BIAS":  # ! TODO: this negation confuses me
         image.header["bias_frame"] = 1
 
     # Save out the median medians to the header for posterity

@@ -8,9 +8,7 @@ from pipeline.resolver.registry import file_match_registry
 def find_highsn_continuum_files(
     primary_file: FileStoreEntry | None, file_store: FileStoreDataFrame
 ) -> list[FileStoreEntry]:
-    """
-    Find the arc file for a given science file.
-    """
+    """Find the arc file for a given science file."""
     assert primary_file is not None, "primary_file must be provided. There is no global suitable continuum file."
 
     # Try to match on the run_id

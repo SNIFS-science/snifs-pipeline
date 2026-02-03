@@ -207,9 +207,13 @@ def extract_file_details(path: Path) -> FileStoreDataFrame | None:  # noqa: C901
         "file_name": path.name,
         "time_added": dt.now(tz=tz.utc),
     }
-    if path.suffix.lower() == ".fits":
+    suffix = path.suffix.lower()
+    if suffix in [".old", ".tmp", ".temp"]:
+        # Ignore temporary or old files
+        return None
+    if suffix == ".fits":
         values = extract_details_from_fits(path) | values
-    elif path.suffix.lower() == ".asdf":
+    elif suffix == ".asdf":
         values = extract_details_from_asdf(path) | values
 
     # Ensure all lowercase
