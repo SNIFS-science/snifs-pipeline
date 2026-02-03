@@ -152,8 +152,8 @@ def log_image_data(name: str, images: Image | list[Image]) -> None:
     _IMAGE_STORE[flow_run_id][name] = images
 
 
-def extract_zoom(data: np.ndarray) -> np.ndarray:
-    return data[ZOOM_START[0] : ZOOM_START[0] + ZOOM_SIZE[0], ZOOM_START[1] : ZOOM_START[1] + ZOOM_SIZE[1]]
+def extract_zoom(data: np.ndarray, zoom_start=ZOOM_START, zoom_size=ZOOM_SIZE) -> np.ndarray:
+    return data[zoom_start[0] : zoom_start[0] + zoom_size[0], zoom_start[1] : zoom_start[1] + zoom_size[1]]
 
 
 def add_colorbar(label: str, fig: plt.Figure, ax: plt.Axes, im: AxesImage, height: float = 0.02) -> None:  # type: ignore
@@ -163,9 +163,9 @@ def add_colorbar(label: str, fig: plt.Figure, ax: plt.Axes, im: AxesImage, heigh
     cbar.ax.tick_params(rotation=0, labelsize=4)
 
 
-def add_callout_rectangle(ax: plt.Axes) -> None:  # type: ignore
+def add_callout_rectangle(ax: plt.Axes, zoom_start=ZOOM_START, zoom_size=ZOOM_SIZE) -> None:  # type: ignore
     """Add a callout rectangle to the axes."""
-    rect = patches.Rectangle(ZOOM_START, ZOOM_SIZE[0], ZOOM_SIZE[1], linewidth=0.5, edgecolor="r", facecolor="none")
+    rect = patches.Rectangle(zoom_start, zoom_size[0], zoom_size[1], linewidth=0.5, edgecolor="r", facecolor="none")
     ax.add_patch(rect)
 
 

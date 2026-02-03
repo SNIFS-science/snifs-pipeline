@@ -53,6 +53,19 @@ def gauss_2d(xy: tuple[np.ndarray, np.ndarray], x0: float, y0: float, a: float, 
     return a * np.exp(-((x - x0) ** 2 / w1**2 + (y - y0) ** 2 / w2**2))
 
 
+def shifted_cosh(x: np.ndarray, a: float, b: float, c: float, d: float) -> np.ndarray:
+    """
+    Args:
+        x : The input data points.
+        a : Amplitude of the cosh function.
+        b : Scaling factor for x.
+        c : Center position.
+        d : Offset of the cosh function.
+    Returns:
+        np.ndarray: The cosh function evaluated at the input data points with a shiftable center."""
+    return a * np.cosh(b * (x - c)) + d
+
+
 def func_2nd(x: np.ndarray, y: np.ndarray, a: float, b: float, c: float, d: float, e: float, f: float) -> np.ndarray:
     """
     Args:

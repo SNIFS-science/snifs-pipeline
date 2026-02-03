@@ -6,8 +6,11 @@ from scipy.optimize import curve_fit
 from pipeline.common.fitting_math__utils import double_gaussian, gaussian
 from pipeline.common.log import get_logger
 from pipeline.common.plotting_utils import find_closest_index, get_wavelengths_to_fit
+from pipeline.flows.preprocess_exposure import PreprocessSummary
 from pipeline.tasks.loaders import load_images_from_file
 from pipeline.tasks.plotting.wavelength_arc_calibration_plots import plot_params, plot_refined_spectrum, plot_spectrum
+from pipeline.tasks.processing.make_parameter_matrix import repeat_shift_fit, shifting_spaxel
+from pipeline.tasks.processing.shift_optimization import shift_and_save
 
 PEAKS_DICT = get_wavelengths_to_fit()
 
@@ -17,23 +20,24 @@ ALL_PEAKS = PEAKS_DICT.keys()
 
 
 def make_flux_array(linespread_path: Path, arc_vector_file: Path) -> np.ndarray:
-    """
-    Creates a flux array by convolving the linespread function with the
+    """Creates a flux array by convolving the linespread function with the
     model-generated spectrum data.
+
     Args:
         linespread_path : Path to the linespread file.
         arc_vector_file : Path to the arc vector file.
+
     Returns:
         np.ndarray: The flux array.
-    """
+    """  # noqa: D205
     big_arr = []
     # TODO: should check that the loaded file is the size we expect it to be otherwise will have problems
-    linespread_file = load_images_from_file(linespread_path)[0].data
-    spectra = linespread_file.reshape(NUMBER_OF_SPAXELS, -1)
+    linespread_data = load_images_from_file(linespread_path)[0].data
+    spectra = linespread_data.reshape(NUMBER_OF_SPAXELS, -1)
 
-    spectrum_file = load_images_from_file(arc_vector_file)[0].data
+    spectrum_data = load_images_from_file(arc_vector_file)[0].data
     for i in range(0, NUMBER_OF_SPAXELS):
-        avg_cross = np.mean(spectrum_file[1400 * i : 1400 * i + 1], axis=0)
+        avg_cross = np.mean(spectrum_data[1400 * i : 1400 * i + 1], axis=0)
         spectrum = np.convolve(avg_cross, spectra[i])
         big_arr.append(spectrum)
     return np.array(big_arr)
@@ -44,15 +48,16 @@ def make_flux_array(linespread_path: Path, arc_vector_file: Path) -> np.ndarray:
 def refine_peak_centers(
     spectrum: np.ndarray, centers: list, window: int = 10, double_range: tuple = (300, 400)
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Args:
-        spectrum: The partially fit spectrum to refine by fitting Gaussians around emission lines.
+    """Args:
+        spectrum: The partially fit spectrum to refine by fitting Gaussians around emission
+          lines.
         centers: The initial np.argnanmax nearest each emission line.
         window: The window size for the Gaussians.
         double_range: The range of peaks to treat as double lines.
+
     Returns:
         np.ndarray: The refined peak centers.
-    """
+    """  # noqa: D205
     x = np.arange(len(spectrum))
     new_centers = []
     fit_params = []
@@ -158,15 +163,15 @@ def refine_peak_centers(
 
 
 def cal_spec(spectrum: np.ndarray, peaks_dict: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Args:
+    """Args:
         spectrum: The spectrum to calibrate.
         peaks_dict: Dictionary of peak positions with wavelengths as the keys and values providing location info.
+
     Returns:
         np.ndarray: The calibrated wavelengths.
         np.ndarray: The polynomial coefficients.
         np.ndarray: The residuals squared.
-    """
+    """  # noqa: D205
     # TODO: add a lot of robustness checks here
 
     improved_peaks = []
@@ -189,16 +194,16 @@ def cal_spec(spectrum: np.ndarray, peaks_dict: dict) -> tuple[np.ndarray, np.nda
 
 
 def recal_spec(spectrum, peak_guesses, corresponding_wavelengths) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Args:
+    """Args:
         spectrum: The spectrum to recalibrate.
         peak_guesses: The guessed peak positions.
         corresponding_wavelengths: The corresponding wavelengths for the guessed peaks.
+
     Returns:
         np.ndarray: The recalibrated wavelengths.
         np.ndarray: The polynomial coefficients.
         np.ndarray: The residuals squared.
-    """
+    """  # noqa: D205
     # this is the part that takes the longest time
     other_new_centers, p = refine_peak_centers(spectrum, peak_guesses, window=3)
     x_points = np.array(range(len(spectrum)))
@@ -212,12 +217,12 @@ def recal_spec(spectrum, peak_guesses, corresponding_wavelengths) -> tuple[np.nd
 
 
 def calibrate_wavelength_arc(arcPath: Path) -> np.ndarray:
-    """
-    Args:
+    """Args:
         arcPath: Path to the arc file to be calibrated.
+
     Returns:
         np.ndarray: The calibrated wavelength parameters.
-    """
+    """  # noqa: D205
     logger = get_logger()
     logger.info(f"Starting wavelength calibration for arc file: {arcPath}")
 
@@ -251,6 +256,38 @@ def calibrate_wavelength_arc(arcPath: Path) -> np.ndarray:
     # np.save(f"{name}fit_wavelength_cal", big_wave)
     logger.info(f"done with arc fits for {p.stem}")
     return params
+
+
+# TODO: the locations of the output parameter files
+# TODO: the spectra
+def full_arc_calibration(preprocessed_arc: PreprocessSummary) -> None:
+    preprocessed_arc_path = Path(preprocessed_arc.output_path)
+    spaxel_list = list(range(0, 224))
+    # do all the translational shifts first
+    repeat_shift_fit(spaxel_list, np.arange(-1.5, 1.5, 0.3).tolist(), True, preprocessed_arc_path, np.zeros(1))
+    shift_and_save(spaxel_list, is_translational_shift=True)
+    # using ideal translational shifts, do the width shifts
+    translation_array = np.load(f"translational_shifts_{preprocessed_arc.run_id}.npy")
+    repeat_shift_fit(
+        spaxel_list,
+        np.arange(0.9, 1.2, 0.05).tolist(),
+        False,
+        preprocessed_arc_path,
+        np.zeros(1),
+        translational_params=translation_array,
+    )
+    shift_and_save(spaxel_list, is_translational_shift=False)
+    # generate the full matrix and vector using oversampling
+    width_array = np.load(f"width_shifts_{preprocessed_arc.run_id}.npy")
+    shifting_spaxel(
+        0,
+        0,
+        True,
+        oversample_factor=4,
+        is_partial=False,
+        translational_params=translation_array,
+        width_params=width_array,
+    )
 
 
 # TODO: make the code in here a top level function (flow) with the entrypoint just calling that function

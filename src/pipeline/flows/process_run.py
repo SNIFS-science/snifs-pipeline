@@ -9,9 +9,9 @@ from pydantic import BaseModel, Field, computed_field
 from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
-from pipeline.flows.wavelength_arc_calibration import calibrate_wavelength_arc
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
+from pipeline.tasks.processing.wavelength_arc_calibration import calibrate_wavelength_arc
 
 
 class ProcessRunConfig(FlowConfig):
