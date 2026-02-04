@@ -29,7 +29,6 @@ from pipeline.common.model_params import (
 )
 from pipeline.resolver.resolver import PUBLIC_PATH_MAP, get_run_id
 from pipeline.tasks.loaders import load_images_from_file
-from pipeline.tasks.plotting.wavelength_arc_calibration_plots import plot_fitting_check
 
 # load the parameterization of the properties of the optics system
 
@@ -133,7 +132,7 @@ def make_matrix(
         spaxel_range = range(225)
 
     for spaxel_ID in spaxel_range:
-        logger.info(spaxel_ID, time.time() - start_time)
+        logger.info(f"starting spaxel {spaxel_ID}, total time = {time.time() - start_time}")
         # find the place in the image where to put the spectrum per spaxel
         a0 = int(A0_PARAMS[spaxel_ID] + yoff)
         a1 = int(A1_PARAMS[spaxel_ID] + yoff) + 1
@@ -148,6 +147,13 @@ def make_matrix(
         xsub = np.linspace(0, a1 - a0 - 1, (a1 - a0) * oversample_factor)
         ysub = np.linspace(0, b1 - b0 - 1, (b1 - b0) * oversample_factor)
 
+        """print("a0", a0)
+        print("a1",a1)
+        print("b0",b0)
+        print("b1",b1)
+        print("xsub",xsub)
+        print("ysub",ysub)"""
+
         xv_sub, yv_sub = np.meshgrid(ysub, xsub)
 
         ##########################################################################
@@ -159,10 +165,13 @@ def make_matrix(
         x0 = np.arange(0, 1400, 1)
 
         p = Polynomial([QUARTIC_LINEAR_PARAMS[spaxel_ID], Z_1ST[spaxel_ID], Z_2ND[spaxel_ID], 0, Z_4TH[spaxel_ID]])
+        # print(p)
         adjustmentP = Polynomial(offsets[spaxel_ID])
+        # print(adjustmentP)
 
         # TODO: make sure the parameters are saved so they cover 0,1400 rather than 50 something
         curve = p(x0) + adjustmentP(x0) + off
+        # print("curve",curve)
         width_polynomial = Polynomial(widths[spaxel_ID])
 
         for spec_element in range(0, 1400):
@@ -304,9 +313,9 @@ def fit(
         numpy.ndarray: array of normalized chi-squared values per height bin.
     """  # noqa: D205
     assert 4096 % num_height_bins == 0, "num_height_bins must be a factor of 4096"
-    data_to_fit_to = load_images_from_file(data_image)[0].data
+    data_to_fit_to = load_images_from_file(data_image)[0].data.T
     if partial:
-        spectrum = np.concatenate(spectrum[15 * spaxel // 15 : 15 * (spaxel // 15 + 1)])
+        spectrum = np.concatenate(spectrum[15 * (spaxel // 15) : 15 * (spaxel // 15 + 1)])
     else:
         spectrum = np.concatenate(spectrum[:])
 
@@ -349,7 +358,7 @@ def fit(
     fitModel = matrix.dot(fit_vector)
     fitModel = fitModel.reshape((4096, 2048))
 
-    plot_fitting_check(fitModel, masked_image_to_fit_to)
+    # plot_fitting_check(fitModel, masked_image_to_fit_to)
     norms = calculate_residuals(fitModel, masked_image_to_fit_to, heights)
 
     stop = time.time()
@@ -430,17 +439,18 @@ def repeat_shift_fit(
 
 
 if __name__ == "__main__":
-    offsets = list(np.arange(-1.7, 1.7, 0.2125, dtype=float))
+    offsets = [-2.0, -1, 0, 1, 2]
+    # offsets = list(np.arange(-1.7, 1.7, 0.2125, dtype=float))
 
     # TODO: use Sam's Preprocess Summary class to identify the type of image
     # TODO: check which file to use and make this a path argument? (idk if that works with pkls)
-    with open("arc_frame_spectrum.json", "r") as f:
+    with open("src/pipeline/tasks/processing/arc_frame_spectrum.json", "r") as f:
         data = json.load(f)
         spec = np.array(data)
 
     ws = list(np.linspace(0.9, 1.3, 1))
 
-    base_dir = Path("/src/pipeline/output/level=preprocessed")
+    base_dir = Path("output/level=preprocessed")
     files = [
         base_dir
         / (
@@ -452,4 +462,4 @@ if __name__ == "__main__":
         data_path = Path(file)
         assert Path(file).exists(), f"File {file} does not exist."
 
-        repeat_shift_fit(list(range(150, 165)), offsets, True, data_path, spec)
+        repeat_shift_fit(list(range(5, 8)), offsets, True, data_path, spec)

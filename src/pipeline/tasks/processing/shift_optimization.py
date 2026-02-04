@@ -91,7 +91,8 @@ if __name__ == "__main__":
     for file in [
         # "generated_image_no_oversample.fits",
         # "model_generated_image.fits",
-        "model_generated_image_no_oversample.fits",
+        # "model_generated_image_no_oversample.fits",
+        "model_generated_image_shifted_pos_one.fits"
     ]:
         try:
             key = file[:-5]
