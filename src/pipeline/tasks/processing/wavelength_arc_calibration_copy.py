@@ -1,6 +1,55 @@
-import multiprocessing
-import time
-from functools import partial
+# import os
+# import psutil
+# import threading
+
+# import time
+# import multiprocessing
+
+# # This function calculates total RAM used by the script + all workers
+# def get_total_mem():
+#     # Identify the main Python process
+#     main_process = psutil.Process(os.getpid())
+#     # Start the counter with the main script's memory
+#     total = main_process.memory_info().rss
+#     # Find all "child" processes (the CPU workers) and add their memory
+#     for child in main_process.children(recursive=True):
+#         try:
+#             total += child.memory_info().rss
+#         except (psutil.NoSuchProcess, psutil.AccessDenied):
+#             pass # Ignore processes that finished exactly while we were checking
+#     return total / (1024 * 1024)  # Convert bytes to Megabytes
+
+# # This class runs as a "spy" in the background while your pool is busy
+# class MemoryMonitor(threading.Thread):
+#     def __init__(self):
+#         super().__init__()
+#         self.peak_mem = 0
+#         self.keep_running = True
+
+#     def run(self):
+#         # While the pool is working, keep checking memory every 0.1 seconds
+#         while self.keep_running:
+#             current = get_total_mem()
+#             if current > self.peak_mem:
+#                 self.peak_mem = current
+#             time.sleep(0.1) # Frequency of the "spy" checks
+
+# if __name__ == '__main__':
+#     # 1. Start the spy thread BEFORE the pool starts
+#     monitor = MemoryMonitor()
+#     monitor.start()
+
+#     # 2. Start the CPU work
+#     # The pool.map() "blocks" the main script, but our monitor thread stays active
+#     with multiprocessing.Pool(4) as pool:
+#         results = pool.map(your_function, data)
+
+#     # 3. Once pool.map() is finished, tell the spy to stop
+#     monitor.keep_running = False
+#     monitor.join()
+
+#     # 4. Now we can see the highest RAM recorded during the execution
+#     print(f"The highest RAM usage reached during execution was: {monitor.peak_mem:.2f} MB")
 from pathlib import Path
 
 import numpy as np
@@ -10,36 +59,20 @@ from pipeline.common.fitting_math__utils import double_gaussian, gaussian
 from pipeline.common.log import get_logger
 from pipeline.common.plotting_utils import find_closest_index, get_wavelengths_to_fit
 from pipeline.flows.preprocess_exposure import PreprocessSummary
-from pipeline.tasks.plotting.wavelength_arc_calibration_plots import plot_params, plot_refined_spectrum
+from pipeline.tasks.plotting.wavelength_arc_calibration_plots import plot_params, plot_refined_spectrum, plot_spectrum
 from pipeline.tasks.processing.make_parameter_matrix import repeat_shift_fit, shifting_spaxel
-from pipeline.tasks.processing.ram_tracker import MemoryMonitor
 from pipeline.tasks.processing.refine_peak_centers_quickly import double_gaussian_jac, gaussian_jac
 from pipeline.tasks.processing.shift_optimization import shift_and_save
 
-# TIME STRUCTURE cpus: 4,6,8,10,12
-# index structure : [0:5]
-# data structure : (total_time_list #list of 10 runs#, parallel time list #list of 10 runs#, RAM list #list of 10 runs)
 # TOTAL_ITER_DOUBLE = []
 
 # TOTAL_ITER_SINGLE = []
 # REFINE_RUN_TIME = 0
 # REFINE_ITERS = 0
 
-# PARALLEL_TIMER[cpu run index][0-9 for repeats on same setup] = CURRENT_LAP
-PARALLEL_TIMER = []
-MONITOR = None
-# CURRENT_LAP[0].append(total_time)
-# CURRENT_LAP[1].append(para_time)
-# CURRENT_LAP[2].append(monitor.get_history())
-# CURRENT_LAP[3].append(monitor.get_peak_mem())
-# CURRENT_LAP[4].append(monitor_parallel_start_ind)
-CURRENT_LAP = [[], [], [], [], []]
+UNIMPROVED_TIME = []
 
-# UNIMPROVED_TIME = []
-
-# IMPROVED_TIME = []
-
-PROCESSING = 8
+IMPROVED_TIME = []
 
 
 PEAKS_DICT = get_wavelengths_to_fit()
@@ -170,6 +203,66 @@ def refine_peak_centers(
 
         else:
             # modified single peak fitting
+
+            # #Zoom in on the region around the spectral peak
+            # left  = max(int(c - window), 0)
+            # right = min(int(c + window) + 1, len(spectrum))
+
+            # local_x = np.arange(left, right)
+            # local_y = spectrum[left:right]
+
+            # #get the offset from the local y values
+            # offset_0 = np.median(local_y)
+
+            # #subtract and regularize the offset (note there could be a problem with 0 as lower bound)
+            # signal = np.clip(local_y - offset_0, 0, None)
+
+            # #Prevent divide by zero errors
+            # if np.sum(signal) > 0:
+            #     #Use the first moment of the local range to estimate center (first moment is like center of mass)
+            #     mu_0 = np.sum(local_x * signal) / np.sum(signal)
+
+            #     #use variance formula for the local region to estimate true variance
+            #     sigma_0 = np.sqrt(
+            #         np.sum(signal * (local_x - mu_0)**2) /
+            #         np.sum(signal)
+            #     )
+            #     #naive guess for amplitude
+            #     amp_0 = np.max(signal)
+
+            # else:
+
+            #     mu_0 = float(c)
+            #     sigma_0 = window / 4
+            #     amp_0 = 1e-6
+
+            # pix_width = 1.0
+
+            # sigma_min = 0.3 * pix_width
+            # sigma_max = window
+
+            # p_0_single = [amp_0, mu_0, sigma_0, offset_0]
+
+            # lower_single = [
+            #     0.0,
+            #     max(c - window, 0),
+            #     sigma_min,
+            #     -np.inf,
+            # ]
+
+            # upper_single = [
+            #     np.inf,
+            #     min(c + window, len(spectrum) - 1),
+            #     sigma_max,
+            #     np.inf,
+            # ]
+
+            # p_0_single = [
+            #     float(np.clip(p_0_single[i],
+            #                 lower_single[i],
+            #                 upper_single[i]))
+            #     for i in range(4)
+            # ]
 
             # ORIGINALLL
             amp_0 = max(spectrum[int(round(c))] - offset_0, 1e-6)
@@ -363,6 +456,18 @@ def refine_peak_centers_modified(
 
             p_0_single = [float(np.clip(p_0_single[i], lower_single[i], upper_single[i])) for i in range(4)]
 
+            # ORIGINALLL
+            # amp_0 = max(spectrum[int(round(c))] - offset_0, 1e-6)
+            # mu_0 = float(c)
+            # sigma_0 = max(window / 2.0, 1e-3)
+
+            # p_0_single = [amp_0, mu_0, sigma_0, offset_0]
+            # lower_single = [0.0, max(c - window, 0), 1e-6, -np.inf]
+            # upper_single = [np.inf, min(c + window, len(spectrum) - 1), np.inf, np.inf]
+
+            # p_0_single = [float(np.clip(p_0_single[i], lower_single[i], upper_single[i])) for i in range(4)]
+            # print("Initial peak guess")
+            # print(p_0_single)
             try:
                 popt, pcov, infodict, errmsg, ier = curve_fit(
                     gaussian,
@@ -411,6 +516,7 @@ def cal_spec(spectrum: np.ndarray, peaks_dict: dict) -> tuple[np.ndarray, np.nda
     """  # noqa: D205
     # TODO: add a lot of robustness checks here
 
+    print(spectrum.shape)
     improved_peaks = []
     wavelengths = []
 
@@ -421,7 +527,7 @@ def cal_spec(spectrum: np.ndarray, peaks_dict: dict) -> tuple[np.ndarray, np.nda
             improved_peaks.append(a + np.nanargmax(spectrum[a:b]))
             wavelengths.append(float(peak))  # peaks_dict[peak].wavelength
 
-    other_new_centers, _ = refine_peak_centers_modified(spectrum, improved_peaks, window=3)
+    other_new_centers, _ = refine_peak_centers(spectrum, improved_peaks, window=3)
 
     # TEST
     plot_refined_spectrum(spectrum, other_new_centers)
@@ -470,7 +576,7 @@ def recal_spec(spectrum, peak_guesses, corresponding_wavelengths) -> tuple[np.nd
         np.ndarray: The residuals squared.
     """  # noqa: D205
     # this is the part that takes the longest time
-    other_new_centers, _ = refine_peak_centers_modified(spectrum, peak_guesses, window=3)
+    other_new_centers, _ = refine_peak_centers(spectrum, peak_guesses, window=3)
     x_points = np.array(range(len(spectrum)))
 
     other_lbda = np.array(list(map(float, corresponding_wavelengths)), dtype=float)
@@ -500,35 +606,17 @@ def calibrate_wavelength_arc(arcPath: Path) -> np.ndarray:
     params = []
     residuals = []
 
-    spaxels = [flux_array[i] for i in range(NUMBER_OF_SPAXELS)]
-    cal_spec_with_dict = partial(
-        cal_spec, peaks_dict=PEAKS_DICT
-    )  # why does cal_spec take in peaks dict if it stays the same
-
-    # I could do
-    # cores_to_use = multiprocessing.cpu_count() - 1
-    # pool = multiprocessing.Pool(processes=cores_to_use)
-
-    print("starting parallel processes")
-    monitor_parallel_start_ind = MONITOR.get_history_index()
-    parallel_start = time.perf_counter()
-    with multiprocessing.Pool(processes=PROCESSING) as pool:
-        results = pool.map(cal_spec_with_dict, spaxels)
-    wavelength_list = [item[0] for item in results]
-    params = [item[1] for item in results]
-    residuals = [item[2] for item in results]
-    logger.info("early RMS: ", np.sqrt(np.mean(residuals)))
-    logger.info("beginning refined fitting")
-    residuals = []
-
-    monitor_parallel_end_ind = MONITOR.get_history_index()
-    parallel_done = time.perf_counter()
-
-    print(f"Successfully processed {len(results)} items.")
-
-    para_time = parallel_done - parallel_start
-
-    CURRENT_LAP[1].append(para_time)
+    # print(NUMBER_OF_SPAXELS) #TEST
+    for i in range(NUMBER_OF_SPAXELS):
+        spec = flux_array[i]
+        waves, ps, res = cal_spec(spec, PEAKS_DICT)
+        wavelength_list.append(waves)
+        params.append(ps)
+        residuals.extend(res)
+        print(f"THIS IS RUN : {i} out of {NUMBER_OF_SPAXELS}")  # TEST
+        logger.info("early RMS: ", np.sqrt(np.mean(residuals)))
+        logger.info("beginning refined fitting")
+        residuals = []
 
     for i in range(flux_array.shape[0]):
         # print(flux_array.shape[0], len(wavelength_list))
@@ -544,17 +632,10 @@ def calibrate_wavelength_arc(arcPath: Path) -> np.ndarray:
     params = np.array(params)
     plot_params(params)  # THIS ONE
     logger.info("late RMS: ", np.sqrt(np.mean(residuals)))
-    # plot_spectrum(np.array(wavelength_list), flux_array) #THIS ONE SKIP FOR NOW
+    plot_spectrum(np.array(wavelength_list), flux_array)  # THIS ONE
     # TODO: decide what we want to save and/or return
     # np.save(f"{name}fit_wavelength_cal", big_wave)
-
     logger.info(f"done with arc fits for {p.stem}")
-    MONITOR.stop()
-    MONITOR.join()
-    CURRENT_LAP[2].append(MONITOR.get_history())
-    CURRENT_LAP[3].append(MONITOR.get_peak_mem())
-    CURRENT_LAP[4].append((monitor_parallel_start_ind, monitor_parallel_end_ind))
-
     return params
 
 
@@ -593,8 +674,6 @@ def full_arc_calibration(preprocessed_arc: PreprocessSummary) -> None:
 # TODO: make the code in here a top level function (flow) with the entrypoint just calling that function
 # TODO: this top level function should take a pydantic configuration object so it can easily integrate with prefect
 if __name__ == "__main__":
-    # START TRACKING TOTAL RAM
-
     base_dir = Path("C:/Users/gibis/URAP/snifs-pipeline/data/level=raw")
     # data\level=raw\runs\run_id=25_056_084\science_red.fits
     # C:\Users\gibis\URAP\snifs-pipeline\data\level=raw\runs\run_id=25_056_084\science_red.fits
@@ -615,35 +694,7 @@ if __name__ == "__main__":
         assert arcVectorPath.exists(), f"File {arcVectorPath} does not exist."
 
         # config = PreprocessExposureConfig(primary_file=file)
-        # calibrate_wavelength_arc(file)
+        calibrate_wavelength_arc(file)
 
-        # timer code
-        cpu_test_range = 6
-        PARALLEL_TIMER = [[] for k in range(cpu_test_range)]
-        for j in range(cpu_test_range):
-            PROCESSING = 2 + j * 2
-
-            if PROCESSING != 12:
-                continue
-
-            for i in range(10):
-                print(f"COMMENCING RUN {i + 1}")
-                MONITOR = MemoryMonitor()
-                MONITOR.start()
-                start = time.perf_counter()
-                calibrate_wavelength_arc(file)
-                end = time.perf_counter()
-                print(f"TIME FOR RUN {i + 1} is {end - start}")
-                CURRENT_LAP[0].append(end - start)
-
-            PARALLEL_TIMER[j].append(CURRENT_LAP)
-
-            CURRENT_LAP = [[], [], [], [], []]
-        # for a cpu run
-        # print(f"IMPROVED RUNTIME: {np.mean([np.mean(PARALLEL_TIMER[0][i][0]) for i in range(len(PARALLEL_TIMER[0])) ])}")
-
-np.save(
-    "C:/Users/gibis/URAP/testing_for_snifs/performance_metrics_of_alg/refine_peaks_with_jacobian/parallel_time_ram_spaxels_corrected_peak_RAM.npy",
-    np.array(PARALLEL_TIMER, dtype=object),
-)
+# np.save("C:/Users/gibis/URAP/testing_for_snifs/performance_metrics_of_alg/refine_peaks_with_jacobian/TOTAL_ITER_SINGLE__njactime.npy",UNIMPROVED_TIME)
 # np.save("C:/Users/gibis/URAP/testing_for_snifs/performance_metrics_of_alg/refine_peaks_with_jacobian/TOTAL_ITER_SINGLE_1cpu_jactime.npy",IMPROVED_TIME)

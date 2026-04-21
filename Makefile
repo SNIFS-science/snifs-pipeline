@@ -1,5 +1,9 @@
 install_uv:
-	@if [ -f "uv" ]; then echo "Downloading uv" && curl -LsSf https://astral.sh/uv/install.sh | sh; else echo "uv already installed"; fi
+	@if ! command -v uv >/dev/null 2>&1; then \
+		echo "Downloading uv" && curl -LsSf https://astral.sh/uv/install.sh | sh; \
+	else \
+		echo "uv already installed"; \
+	fi
 	uv self update
 
 install_python:
