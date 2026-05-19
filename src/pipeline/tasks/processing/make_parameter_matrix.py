@@ -1,0 +1,409 @@
+import json
+import multiprocessing
+import os
+import time
+
+import numpy as np
+from astropy.io import fits
+from numpy.polynomial import Polynomial
+from scipy import sparse
+from scipy.interpolate import interp1d  # noqa: F401
+from scipy.sparse import eye as speye
+from scipy.sparse.linalg import spsolve
+
+from pipeline.common.fitting_math__utils import pseudo_voigt
+from pipeline.common.log import get_logger
+from pipeline.common.model_params import (
+    A0_PARAMS,
+    A1_PARAMS,
+    B0_PARAMS,
+    B1_PARAMS,
+    ELL_A,
+    ELL_B,
+    ELL_C0,
+    ELL_C1,
+    LIN_CROSS,
+    LIN_SPEC,
+    QUAD_SPEC,
+    QUARTIC_LINEAR_PARAMS,
+    Z_1ST,
+    Z_2ND,
+    Z_4TH,
+)
+from pipeline.common.prefect_utils import pipeline_task
+from pipeline.tasks.plotting.wavelength_arc_calibration_plots import animate_poly_convergence
+
+logger = get_logger()
+superStart = time.time()
+# global offsets to the spectrum taken from the cross-correlation of the arc with a reference arc.
+xoff = 0
+yoff = 0
+
+total_coeffs = {str(spax): {"0": [0.0, 0.0, 0.0, 0.0, 0.0]} for spax in range(225)}
+total_widths = {str(spax): {"0": [0.0, 0.0, 0.0, 0.0, 1.0]} for spax in range(225)}
+
+if os.path.exists("loop_shifts_editable.json") and os.path.exists("loop_widths_editable.json"):
+    with open("loop_shifts_editable.json", "r") as f:
+        total_coeffs = json.load(f)
+    with open("loop_widths_editable.json", "r") as f:
+        total_widths = json.load(f)
+    logger.info("Adding to existing loop_shifts_editable.json / loop_widths_editable.json")
+
+offsets_cross_disp = np.zeros(225)
+offsets_cross_disp[~np.isfinite(offsets_cross_disp)] = 0.0  # fix for nans in the array
+
+n_cross = (np.log(0.0032) - np.log(6.90e-4)) / (np.log(4.917) - np.log(26.939))
+n_spec = (np.log(0.0040) - np.log(8.447e-4)) / (np.log(4.52) - np.log(21.026))
+
+start_time = time.time()
+
+rowindex, columnindex = np.meshgrid(np.arange(0, 2048, 1), np.arange(0, 4096, 1))
+
+
+def stat_l1(sci: np.ndarray, mod: np.ndarray, sl: tuple) -> float:
+    return float(np.nansum(np.abs(sci[sl] - mod[sl])))
+
+
+@pipeline_task()
+def makeShiftedMat(
+    spaxel: int, offsets: np.ndarray, widths: np.ndarray, oversample_factor: int = 1, iteration: int = 0
+):
+    assert oversample_factor > 0, "can't divide by 0"
+
+    # offsests is a list of 225 offsets in the cross-dispersion direction
+    worker = multiprocessing.current_process().name
+    row_start = 15 * (spaxel // 15)
+    row_end = 15 * (spaxel // 15 + 1)
+
+    list_huge_matrix = []
+
+    for spaxel_ID in range(row_start, row_end):
+        logger.info(f"[{worker}]   spaxel_ID={spaxel_ID}, elapsed={time.time() - start_time:.1f}s")
+        # create a new image
+        # find the place in the image where to put the spectrum per spaxel
+        a0 = int(A0_PARAMS[spaxel_ID] + yoff)
+        a1 = int(A1_PARAMS[spaxel_ID] + yoff) + 1
+        b0 = int(B0_PARAMS[spaxel_ID] + xoff - 50)
+        off = 50
+        if b0 < 0:
+            off += b0
+            b0 = 0
+
+        b1 = int(B1_PARAMS[spaxel_ID] + xoff + 50) + 1
+
+        # try:
+        xsub = np.linspace(0, a1 - a0 - 1, (a1 - a0) * oversample_factor)
+        ysub = np.linspace(0, b1 - b0 - 1, (b1 - b0) * oversample_factor)
+
+        xv_sub, yv_sub = np.meshgrid(ysub, xsub)
+
+        # we will model 1400 spectral elements for each spaxel in the blue cube
+        x0 = np.arange(0, 1400, 1)
+
+        p = Polynomial([QUARTIC_LINEAR_PARAMS[spaxel_ID], Z_1ST[spaxel_ID], Z_2ND[spaxel_ID], 0, Z_4TH[spaxel_ID]])
+        adjustmentP = Polynomial(offsets[spaxel_ID])
+
+        curve = p(x0) + adjustmentP(x0) + off
+
+        if spaxel_ID == spaxel:
+            # latest_s = str(list(shift_keys)[iteration])
+            latest_s = str(max(int(k) for k in total_coeffs[str(spaxel_ID)].keys()))
+            logger.info(f"latest shift vals: {total_coeffs[str(spaxel_ID)][latest_s]}")
+            curve = curve + np.poly1d(total_coeffs[str(spaxel_ID)][latest_s])(x0)
+
+        widthAdjustmentP = Polynomial(widths[spaxel_ID])
+        widthVals = widthAdjustmentP(x0)
+
+        if spaxel_ID == spaxel:  # doing a spaxel specific width adjustment to refine
+            # latest_w = str(list(width_keys)[iteration])
+            latest_w = str(max(int(k) for k in total_widths[str(spaxel_ID)].keys()))
+            logger.info(f"latest width vals: {total_widths[str(spaxel_ID)][latest_w]}")
+            widthVals += np.poly1d(total_widths[str(spaxel_ID)][latest_w])(x0)
+
+        ######################################################
+        for spec_element in range(0, 1400):
+            # the per spaxel per wavelength model will be in this box:
+            c0 = int(spec_element - 50) * oversample_factor
+            if c0 < 0:
+                c0 = 0
+            c1 = int(spec_element + 50) * oversample_factor
+            if c1 >= 1400 * oversample_factor:
+                c1 = int(1400 * oversample_factor)
+
+            ##########################################################################
+            # the monochromatic image for spaxel with number spaxel_ID can be found in this box.
+            # image[a0:a1,b0:b1][c0:c1,int(curve[spec_element]-50):int(curve[spec_element]+50)]
+
+            d0 = int(round((curve[spec_element] - 50))) * oversample_factor
+            if d0 < 0:
+                d0 = 0
+            d1 = int(round((curve[spec_element] + 50))) * oversample_factor
+            if d1 >= 1400 * oversample_factor:
+                d1 = int(1400 * oversample_factor) - 1
+
+            xv_sub_mono = xv_sub[c0:c1, d0:d1]
+            yv_sub_mono = yv_sub[c0:c1, d0:d1]
+
+            # make the model ########################################
+            popt = [0, 0]  # a way to allow for a shift.
+            # redefine x and y
+            y = yv_sub_mono.T[0] - spec_element
+            x = xv_sub_mono[0] - curve[spec_element]
+
+            spec_trace = QUAD_SPEC[spaxel_ID] * y**2 + LIN_SPEC[spaxel_ID] * y + popt[0]
+            cross_trace = LIN_CROSS[spaxel_ID] * x + popt[1]
+
+            xiii = (xv_sub_mono - curve[spec_element]).T - spec_trace
+            yiii = (yv_sub_mono - spec_element) - cross_trace
+
+            mask_footprint = (
+                np.sqrt(
+                    (yv_sub_mono - spec_element - ELL_C1[spaxel_ID] - popt[1]) ** 2 / ELL_B[spaxel_ID] ** 2
+                    + (xv_sub_mono - curve[spec_element] - ELL_C0[spaxel_ID] - popt[0]) ** 2 / ELL_A[spaxel_ID] ** 2
+                )
+                < 1
+            )
+
+            spectral = 0.8 * pseudo_voigt(
+                np.abs(xiii), 0, 0.6 * widthVals[spec_element], 1.3 * widthVals[spec_element], 5.4, 0.6
+            ) + pseudo_voigt(np.abs(xiii), 0, 1.2, 0.2, -n_spec, 0.1, beta=0)
+            crossdis = 0.99 * pseudo_voigt(
+                np.abs(yiii), 0, 0.6 * widthVals[spec_element], 1.4 * widthVals[spec_element], 5.2, 0.6
+            ) + pseudo_voigt(np.abs(yiii), 0, 1.2, 0.1, -n_cross, 0.1, beta=0, l_off=10)
+
+            model = spectral * crossdis.T * (mask_footprint.T * 1.0)
+            model = model / np.max(model)
+
+            H = model.shape[0] // oversample_factor
+            W = model.shape[1] // oversample_factor
+            testModel = (
+                model[: H * oversample_factor, : W * oversample_factor]
+                .reshape(H, oversample_factor, W, oversample_factor)
+                .sum(axis=(1, 3))
+            )
+
+            c0 = c0 // oversample_factor
+            c1 = c1 // oversample_factor
+            d0 = d0 // oversample_factor
+            d1 = d1 // oversample_factor
+
+            mask_val = testModel.T > 1e-4
+
+            rowind = rowindex[a0:a1, b0:b1][c0:c1, d0:d1]
+
+            row = rowind[mask_val[: len(rowind), : len(rowind.T)]]
+            colind = columnindex[a0:a1, b0:b1][c0:c1, d0:d1]
+            col = colind[mask_val[: len(rowind), : len(rowind.T)]]
+
+            data = testModel.T[: len(rowind), : len(rowind.T)][mask_val[: len(rowind), : len(rowind.T)]]
+            s_image = sparse.csr_matrix((data, (col, row)), shape=(4096, 2048))
+
+            s_image = s_image.reshape((1, int(2048 * 4096)))
+            list_huge_matrix.append(s_image)
+
+    huge_matrix = sparse.vstack(list_huge_matrix)
+
+    return huge_matrix
+
+
+def fit(matrix, image, spectra, worker="main", spaxel=0, iteration=0):
+    logger.info(f"[{worker}]   fitting model for spaxel={spaxel}, iteration={iteration}...")
+    matrix = matrix.transpose()
+    spectra = sparse.csr_matrix(spectra).transpose()
+
+    shifted_image = matrix.dot(spectra).reshape((4096, 2048)).todense()
+
+    flag = (shifted_image > 0.0) & np.isfinite(image)
+    imagea = np.where(flag, image, 0.0)
+
+    fl = np.array(imagea.flatten().transpose().flat)
+    assert np.all(np.isfinite(fl)), "b contains NaN or Inf!"
+
+    AtA = matrix.T.dot(matrix).tocsc()
+    Atb = matrix.T.dot(fl)
+    # small regularization guards against singular columns (zero-contribution elements)
+    AtA += 1e-10 * speye(AtA.shape[0], format="csc")
+    x = spsolve(AtA, Atb)
+
+    fitModel = matrix.dot(x).reshape((4096, 2048))
+
+    hdu = fits.PrimaryHDU(fitModel)
+    fits_filename = f"spaxel_{spaxel}_iteration_{iteration}.fits"
+    hdulist = fits.HDUList([hdu])
+    hdulist.writeto(fits_filename, overwrite=True)
+    hdulist.close()
+
+    return fitModel
+
+
+# TODO: CHANGE OVERSAMPLE FACTOR BACK TO 4
+def compute_for_param(spax, param, is_offset, iteration=0):
+    """Build model matrix and return per-bin L1 statistics for one (spax, param) task."""
+    worker = multiprocessing.current_process().name
+
+    spectra = np.concatenate(spec[15 * (spax // 15) : 15 * (spax // 15 + 1)])
+
+    offsets = np.zeros(225)
+    widths = np.zeros(225)
+    if is_offset:
+        offsets[spax] = param
+        print(f"[{worker}] spaxel={spax} applying offset={param:+.3f} to spaxel {spax}, building matrix...", flush=True)
+        mat = makeShiftedMat(spax, offsets, widths=widths, oversample_factor=4, iteration=iteration)
+    else:
+        widths[spax] = param
+        print(f"[{worker}] spaxel={spax} applying width={param:.3f}, building matrix...", flush=True)
+        mat = makeShiftedMat(spax, offsets, widths=widths, oversample_factor=4, iteration=iteration)
+
+    model = fit(mat, science_image, spectra, worker=worker, spaxel=spax, iteration=iteration)
+
+    bin_stats = np.full(n_bins, np.nan)
+    for bin_idx in range(n_bins):
+        sl = (slice(int(heights[bin_idx]), int(heights[bin_idx + 1])), slice(None))
+        try:
+            bin_stats[bin_idx] = stat_l1(science_image, model, sl)  # type:ignore
+        except Exception:
+            pass
+
+    return bin_stats
+
+
+def fit_best_shift(shifts, values, degree=4):
+    """Fit a degree-N polynomial and return the shift at the minimum."""
+    coeffs = np.polyfit(shifts, values, degree)
+    poly = np.poly1d(coeffs)
+    x_fine = np.linspace(shifts.min(), shifts.max(), 2000)
+    return x_fine[np.argmin(poly(x_fine))]
+
+
+def psf_calculation(sum_along_cross_disp: np.ndarray) -> np.ndarray:
+    """Calculate the psf.
+
+    Args:
+        sum_along_cross_disp: numpy array of summed cross-dispersion profile for one spec element
+
+    Returns:
+        line profile function: adjusted cross-dispersion profile of length 100
+    """
+    if len(sum_along_cross_disp) != 100:
+        toAppend = np.zeros(100)
+        toAppend[: len(sum_along_cross_disp)] = sum_along_cross_disp
+        return toAppend
+    return sum_along_cross_disp
+
+
+def l1_calculations(spaxels_to_process, flat_results, n_params, iteration, is_offset_iter):
+    for spax_idx, spax in enumerate(spaxels_to_process):
+        bin_stats_per_param = np.array(
+            flat_results[spax_idx * n_params : (spax_idx + 1) * n_params]
+        ).T  # shape: (n_bins, n_params)
+
+        results_L1 = np.full(n_bins, np.nan)
+        for bin_idx in range(n_bins):
+            vals = bin_stats_per_param[bin_idx]
+            if np.sum(np.isfinite(vals)) >= 4:
+                results_L1[bin_idx] = fit_best_shift(np.array(params), vals)
+
+        a0 = int(A0_PARAMS[spax] + yoff)
+        a1 = int(A1_PARAMS[spax] + yoff) + 1
+
+        f2 = interp1d(x_sparse[a0 // 16 - 2 : a1 // 16 + 2], results_L1[a0 // 16 - 2 : a1 // 16 + 2], kind="nearest")
+        x_dense = np.arange(a0, a1 - 1)
+        L1_dense = np.array(f2(x_dense))
+
+        fittable = np.copy(L1_dense)
+        fittable[220:540] = np.nan
+        x_fittable = np.arange(len(fittable))
+        mask_fin = np.isfinite(fittable)
+        coeffs = np.polyfit(x_fittable[mask_fin], fittable[mask_fin], 4)
+
+        print(f"Spaxel {spax}, L1 Coefficients: {coeffs}")
+
+        new_coeffs = coeffs.tolist()
+        prev_key = str(max(0, iteration - 1))
+        if is_offset_iter:
+            cumulative = np.polyadd(total_coeffs[str(spax)][prev_key], new_coeffs).tolist()
+            total_coeffs[str(spax)][str(iteration + 1)] = cumulative
+            print(f"Updated total_coeffs for spaxel {spax}: {total_coeffs[str(spax)]}", flush=True)
+        else:
+            cumulative = np.polyadd(total_widths[str(spax)][prev_key], new_coeffs).tolist()
+            total_widths[str(spax)][str(iteration + 1)] = cumulative
+            print(f"Updated total_widths for spaxel {spax}: {total_widths[str(spax)]}", flush=True)
+
+
+if __name__ == "__main__":
+    shift_offsets = [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2]
+    width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
+
+    N_WORKERS = 1
+
+    spec = np.ones((225, 1400))
+
+    heights = np.linspace(0, 4095, 256)
+    n_bins = len(heights) - 1
+    x_sparse = np.linspace(0, 4095, 256) + 8
+
+    iteration = 0
+
+    with fits.open("/Users/anousha/Desktop/SNIFS/model/refs/deep_skyflat_coadd.fits") as hdul:
+        science_image = hdul[0].data  # type:ignore
+
+    spaxels_to_process = [112]
+
+    while iteration < 14:
+        one_iteration_start = time.time()
+        l1_coeffs_dict = {}
+        is_offset_iter = iteration % 2 == 0
+        params = shift_offsets if is_offset_iter else width_multipliers
+        n_params = len(params)
+
+        logger.info(
+            f"iteration {iteration}, {'offsets' if is_offset_iter else 'widths'}, "
+            f"{len(spaxels_to_process) * n_params} tasks → parallel"
+        )
+
+        # Build all (spax, param) tasks — independent, run in parallel.
+        # Fork inherits all module-level globals (para, science_image, total_coeffs, etc.)
+        # so workers see the current state without re-loading any data.
+        tasks = [(spax, param, is_offset_iter, iteration) for spax in spaxels_to_process for param in params]
+
+        ctx = multiprocessing.get_context("fork")
+        with ctx.Pool(processes=N_WORKERS) as pool:
+            flat_results = pool.starmap(compute_for_param, tasks)
+
+        l1_calculations(spaxels_to_process, flat_results, n_params, iteration, is_offset_iter)
+
+        iteration += 1
+
+        with open("loop_shifts_editable.json", "w") as f:
+            json.dump(total_coeffs, f)
+            logger.info(f"updated loop_shifts_editable.json after iteration {iteration}")
+        with open("loop_widths_editable.json", "w") as f:
+            json.dump(total_widths, f)
+            logger.info(f"updated loop_widths_editable.json after iteration {iteration}")
+
+    iteration = 14
+    print(total_coeffs["111"].keys())
+    for spaxel in spaxels_to_process:
+        print(spaxel)
+        models = []
+        for it in range(0, iteration, 2):
+            fname = f"spaxel_{spaxel}_iteration_{it}.fits"
+            with fits.open(fname) as hdul:
+                models.append(hdul[0].data)
+            print(fname)
+            print(total_widths[str(spaxel)][str(it)])
+        animate_poly_convergence(
+            science_image,
+            models,
+            total_widths,
+            str(spaxel),
+            row_range=(700, 3000),
+            col_range=(970, 1100),
+            x_range=(0, 1400),
+            fps=2,
+            fade_factor=0.6,
+            image_labels=None,
+            colsum_yscale="symlog",
+        )
+
+# TODO: modify fits header of the image to indicate how many iterations were done for what spaxels and paths to the json

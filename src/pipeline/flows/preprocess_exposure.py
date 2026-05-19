@@ -152,7 +152,7 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     # Apply the custom red flat if we can't find a flat at all, or we're processing a red flat.
     if primary.channel == "R" and (conf.flat_image_file is None or conf.flat_image_file == conf.primary_file):
         image = apply_custom_red_flat(image)
-    image = remove_cosmic_rays(image)
+    # image = remove_cosmic_rays(image)
 
     # And now we have the boilerplate file output section, along with some extra diagnostic plots.
     image.header["level"] = "preprocess"
@@ -160,7 +160,7 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     image.to_fits(conf.output_image_file.with_suffix(".fits"))
     conf.resolver.ensure_file_exists(conf.output_image_file)
     plot_bias_sections(primary, conf.public_folder)
-    plot_detailed_images(primary, conf.public_folder)
+    # plot_detailed_images(primary, conf.public_folder)
 
     # This summary could be removed if the pipeline database is done differently (replaced with an INSERT or API)
     # but right now the purpose of this is get a file out that's got data mirrored in SQLite, which is what

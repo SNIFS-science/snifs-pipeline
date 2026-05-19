@@ -12,8 +12,8 @@ from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
-from pipeline.tasks.processing.calibration import calibrate_continuum, calibrate_wavelengths
-from pipeline.tasks.summaries import summarise_image
+#from pipeline.tasks.processing.make_parameter_matrix import make_matrix
+from pipeline.tasks.processing.wavelength_arc_calibration import calibrate_wavelength_arc
 
 
 class ProcessRunConfig(FlowConfig):
@@ -57,7 +57,8 @@ async def process_run(conf: ProcessRunConfig) -> None:
     # First, we want to grab all raw exposures associated with this run.
     run_filter = pl.col("run_id").eq(conf.run_id) & pl.col("level").eq("raw")
     exposure_paths = [Path(p) for p in conf.resolver.file_store.filter(run_filter)["file_path"]]
-
+    for path in exposure_paths:
+        print(f"Found exposure file: {path}")
     # For each of these exposures, we want to trigger the preprocess flow to clean them up.
     processed = [preprocess_exposure(PreprocessExposureConfig(primary_file=path)) for path in exposure_paths]
 
@@ -67,10 +68,23 @@ async def process_run(conf: ProcessRunConfig) -> None:
         conf.resolver.ensure_file_exists(p.output_path)
 
     # We need to separate science exposures from others because they're the main focus
+    arc_exposures = [p for p in processed if p.file_type == FileType.ARC]
     science_exposures = [p for p in processed if p.file_type == FileType.SCIENCE]
 
-    for file_entry in science_exposures:
-        image = Image.from_asdf(file_entry.output_path)
+    """for arc in arc_exposures:
+        if arc.channel == "B":
+            # wavelength_calibration_config = WavelengthConfig(
+            #    arc_path=arc.output_path,
+            # )
+            sparse_matrix = make_matrix(112, arc.run_id, partial=False) # type: ignore
+            # calibrate_wavelength_arc(arc)
+    for science_image in science_exposures:
+        if science_image.channel == "B":
+            print(science_image.run_id)
+            sparse_matrix = make_matrix(112, science_image.run_id, partial=False) # type: ignore
+            # fit(sparse_matrix, Path(science_image.output_path)) """
+    # for file_entry in science_exposures:
+    #     image = Image.from_asdf(file_entry.output_path)
 
         continuums = [e for e in processed if e.file_type == FileType.CONTINUUM and e.channel == file_entry.channel]
         assert len(continuums) == 1
@@ -96,7 +110,7 @@ async def process_run(conf: ProcessRunConfig) -> None:
 if __name__ == "__main__":
 
     async def main() -> None:
-        config = ProcessRunConfig(run_id="25_056_084")
+        config = ProcessRunConfig(run_id="25_291_003")
         await process_run(config)
 
     asyncio.run(main())

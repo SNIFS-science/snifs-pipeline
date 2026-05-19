@@ -165,7 +165,9 @@ def add_colorbar(label: str, fig: plt.Figure, ax: plt.Axes, im: AxesImage, heigh
 
 def add_callout_rectangle(ax: plt.Axes) -> None:  # type: ignore
     """Add a callout rectangle to the axes."""
-    rect = patches.Rectangle(ZOOM_START, ZOOM_SIZE[0], ZOOM_SIZE[1], linewidth=0.5, edgecolor="r", facecolor="none")
+    rect = patches.Rectangle(
+        np.flip(ZOOM_START), ZOOM_SIZE[1], ZOOM_SIZE[0], linewidth=0.5, edgecolor="r", facecolor="none"
+    )
     ax.add_patch(rect)
 
 
@@ -195,17 +197,19 @@ def add_ticks(ax: plt.Axes, locations: dict[int, str], axis: str = "y", reach: f
 
 def add_midlines(ax: plt.Axes) -> None:  # type: ignore
     with contextlib.suppress(Exception):
+        midline_x_coord = ZOOM_START[0] + ZOOM_SIZE[0] // 2
+        midline_y_coord = ZOOM_START[1] + ZOOM_SIZE[1] // 2
         ax.hlines(
-            MIDLINE_Y_COORD,
-            xmin=ZOOM_START[0],
-            xmax=ZOOM_END[0],
+            midline_y_coord,
+            xmin=ZOOM_START[1],
+            xmax=ZOOM_END[1],
             color=MIDLINE_HORIZONTAL_COLOUR,
             lw=0.5,
         )
         ax.vlines(
-            MIDLINE_X_COORD,
-            ymin=ZOOM_START[1],
-            ymax=ZOOM_END[1],
+            midline_x_coord,
+            ymin=ZOOM_START[0],
+            ymax=ZOOM_END[0],
             color=MIDLINE_VERTICAL_COLOUR,
             lw=0.5,
         )
