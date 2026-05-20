@@ -17,6 +17,7 @@ from pipeline.tasks.processing.make_parameter_matrix import run_make_parameter_m
 class ProcessRunConfig(FlowConfig):
     run_id: str = Field(description="The ID of the run to process.", examples=["25_057_001"])
     refresh_filestore: bool = Field(default=True)
+    spaxels_to_process: list[int] | None = Field(default=None, description="Spaxels to process; None means all 225.")
 
     @cached_property
     def output_folder(self) -> Path:
@@ -74,6 +75,7 @@ async def process_run(conf: ProcessRunConfig) -> None:
             run_make_parameter_matrix(
                 science_exposure_path=Path(science.output_path),
                 output_dir=conf.output_folder,
+                spaxels_to_process=conf.spaxels_to_process,
             )
 
     """for arc in arc_exposures:
@@ -115,7 +117,7 @@ async def process_run(conf: ProcessRunConfig) -> None:
 if __name__ == "__main__":
 
     async def main() -> None:
-        config = ProcessRunConfig(run_id="25_291_003")
+        config = ProcessRunConfig(run_id="25_199_028", spaxels_to_process=[117])
         await process_run(config)
 
     asyncio.run(main())
