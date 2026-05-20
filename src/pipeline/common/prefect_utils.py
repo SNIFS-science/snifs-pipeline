@@ -7,6 +7,7 @@ from uuid import UUID
 
 from prefect import Flow, flow, get_client, task
 from prefect.artifacts import create_image_artifact as _create_image_artifact
+from prefect.artifacts import create_link_artifact as _create_link_artifact
 from prefect.artifacts import create_markdown_artifact as _create_markdown_artifact
 from prefect.client.schemas.filters import ArtifactFilter, ArtifactFilterFlowRunId, ArtifactFilterKey
 from prefect.deployments import run_deployment as prefect_run_deployment
@@ -17,7 +18,7 @@ from pipeline.common.log import get_logger
 
 
 class Settings(BaseSettings):
-    prefect_enabled: bool = False
+    prefect_enabled: bool = True
 
 
 settings = Settings()
@@ -54,6 +55,13 @@ def create_image_artifact(*args, **kwargs) -> UUID | None:
 def create_markdown_artifact(*args, **kwargs) -> UUID | None:
     if settings.prefect_enabled:
         return _create_markdown_artifact(*args, **kwargs)  # type: ignore
+    return None
+
+
+@wraps(_create_link_artifact)
+def create_link_artifact(*args, **kwargs) -> UUID | None:
+    if settings.prefect_enabled:
+        return _create_link_artifact(*args, **kwargs)  # type: ignore
     return None
 
 

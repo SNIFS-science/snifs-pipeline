@@ -6,14 +6,12 @@ from pathlib import Path
 import polars as pl
 from pydantic import BaseModel, Field, computed_field
 
-from pipeline.common.image import Image
 from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
-#from pipeline.tasks.processing.make_parameter_matrix import make_matrix
-from pipeline.tasks.processing.wavelength_arc_calibration import calibrate_wavelength_arc
+from pipeline.tasks.processing.make_parameter_matrix import run_make_parameter_matrix
 
 
 class ProcessRunConfig(FlowConfig):
@@ -68,8 +66,15 @@ async def process_run(conf: ProcessRunConfig) -> None:
         conf.resolver.ensure_file_exists(p.output_path)
 
     # We need to separate science exposures from others because they're the main focus
-    arc_exposures = [p for p in processed if p.file_type == FileType.ARC]
+    # arc_exposures = [p for p in processed if p.file_type == FileType.ARC]
     science_exposures = [p for p in processed if p.file_type == FileType.SCIENCE]
+
+    for science in science_exposures:
+        if science.channel == "B":
+            run_make_parameter_matrix(
+                science_exposure_path=Path(science.output_path),
+                output_dir=conf.output_folder,
+            )
 
     """for arc in arc_exposures:
         if arc.channel == "B":
@@ -82,7 +87,7 @@ async def process_run(conf: ProcessRunConfig) -> None:
         if science_image.channel == "B":
             print(science_image.run_id)
             sparse_matrix = make_matrix(112, science_image.run_id, partial=False) # type: ignore
-            # fit(sparse_matrix, Path(science_image.output_path)) """
+            # fit(sparse_matrix, Path(science_image.output_path))
     # for file_entry in science_exposures:
     #     image = Image.from_asdf(file_entry.output_path)
 
@@ -104,7 +109,7 @@ async def process_run(conf: ProcessRunConfig) -> None:
             conf.output_summary_file,
             discriminator="process_exposure",
         )
-        # write_summary(conf.resolver, summary)
+        # write_summary(conf.resolver, summary)"""
 
 
 if __name__ == "__main__":
