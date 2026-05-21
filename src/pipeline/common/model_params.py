@@ -1934,3 +1934,11 @@ ELL_B = func_4th(X_PARAMS, Y_PARAMS, *ELL3_PARAMS)
 default_shift_offsets = np.zeros((225, 5))
 default_width_offsets = np.zeros((225, 5))
 default_width_offsets[:, 0] = 1  # because this is a multiplier, not an additive offset
+
+
+if __name__ == "__main__":
+    spaxel = 8
+    print("A0_PARAMS:", A0_PARAMS[spaxel])
+    print("A1_PARAMS:", A1_PARAMS[spaxel])
+    print("B0_PARAMS:", B0_PARAMS[spaxel])
+    print("B1_PARAMS:", B1_PARAMS[spaxel])

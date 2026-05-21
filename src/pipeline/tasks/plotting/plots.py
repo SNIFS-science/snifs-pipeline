@@ -247,10 +247,19 @@ def plot_standalone_func(images: Image | list[Image], key: str) -> None:  # noqa
     title = f"{title_prefix} - {key}"
     aspect_ratio = images[0].data.shape[1] / images[0].data.shape[0]
 
+    _WEBP_DPI = 300
+    _WEBP_MAX_INCHES = 16383 / _WEBP_DPI * 0.95
+    fig_w = num_cols * 3 + 1.5
+    fig_h = 3 * aspect_ratio + 1.5
+    if max(fig_w, fig_h) > _WEBP_MAX_INCHES:
+        scale = _WEBP_MAX_INCHES / max(fig_w, fig_h)
+        fig_w *= scale
+        fig_h *= scale
+
     fig, axes = plt.subplots(
         1,
         num_cols,
-        figsize=(num_cols * 3 + 1.5, 3 * aspect_ratio + 1.5),
+        figsize=(fig_w, fig_h),
         gridspec_kw={"hspace": 0.1, "wspace": 0.1},
     )
     axes[0].annotate(title, xy=(0, 1.01), xycoords="axes fraction", ha="left", va="bottom", fontsize=6)
@@ -280,7 +289,7 @@ def plot_standalone_func(images: Image | list[Image], key: str) -> None:  # noqa
     ).resolve()
     output_location.parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving plot to {output_location}")
-    fig.savefig(output_location, dpi=600, bbox_inches="tight")
+    fig.savefig(output_location, dpi=300, bbox_inches="tight")
     plt.close(fig)
     output_location.chmod(0o644)  # Make the file readable by everyone
     create_image_artifact(
@@ -487,7 +496,7 @@ def plot_detailed_images(primary: FileStoreEntry, output_path: Path, start: str 
         output_location = (output_path / f"preprocessing_detailed_{i}_{key}.webp").resolve()
         output_location.parent.mkdir(parents=True, exist_ok=True)
         logger.info(f"Saving plot to {output_location}")
-        fig.savefig(output_location, dpi=600, bbox_inches="tight")
+        fig.savefig(output_location, dpi=300, bbox_inches="tight")
         plt.close(fig)
         output_location.chmod(0o644)  # Make the file readable by everyone
         create_image_artifact(

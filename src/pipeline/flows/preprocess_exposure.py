@@ -34,6 +34,7 @@ from pipeline.tasks.summaries import summarise_image, write_summary
 
 class PreprocessExposureConfig(FlowConfig):
     primary_file: Path = Field(description="Location of the continuum exposure file. Relative to the data path.")
+    refresh_filestore: bool = Field(default=True)
     bias_image_file: FileType.BIAS.Path = Field(default=None, validate_default=True)
     bias_model_file: FileType.BIAS_MODEL.Path = Field(default=None, validate_default=True)
     dark_image_file: FileType.DARK.Path = Field(default=None, validate_default=True)
@@ -43,7 +44,6 @@ class PreprocessExposureConfig(FlowConfig):
     binary_offset_model_file: FileType.BINARY_OFFSET_MODEL.Path = Field(default=None, validate_default=True)
     prefer_bias_image: bool = Field(default=True)
     use_dark_stack_if_possible: bool = Field(default=True)
-    refresh_filestore: bool = Field(default=True)
     use_cache: bool = Field(default=True, description="Whether to use cached files where possible.")
 
     @cached_property

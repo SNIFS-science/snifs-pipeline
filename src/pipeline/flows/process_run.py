@@ -54,7 +54,12 @@ async def process_run(conf: ProcessRunConfig) -> None:
     conf.initialise_and_log()
 
     # First, we want to grab all raw exposures associated with this run.
-    run_filter = pl.col("run_id").eq(conf.run_id) & pl.col("level").eq("raw")
+    preprocessable_types = [FileType.SCIENCE, FileType.CONTINUUM, FileType.ARC]
+    run_filter = (
+        pl.col("run_id").eq(conf.run_id)
+        & pl.col("level").eq("raw")
+        & pl.col("file_type").is_in([t.value for t in preprocessable_types])
+    )
     exposure_paths = [Path(p) for p in conf.resolver.file_store.filter(run_filter)["file_path"]]
     for path in exposure_paths:
         print(f"Found exposure file: {path}")

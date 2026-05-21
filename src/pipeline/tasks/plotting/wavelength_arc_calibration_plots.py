@@ -49,6 +49,15 @@ def animate_poly_convergence(
     inner = coeffs_dict[str(outer_key)]
     sorted_items = sorted(inner.items(), key=lambda kv: int(kv[0]))
 
+    a0 = int(A0_PARAMS[int(outer_key)])
+    a1 = int(A1_PARAMS[int(outer_key)]) + 1
+    b0 = int(B0_PARAMS[int(outer_key)]) - 50
+    off = 50
+    if b0 < 0:
+        off += b0
+        b0 = 0
+    b1 = int(B1_PARAMS[int(outer_key)]) + 50 + 1
+
     # if the dict has more entries than models, drop from the front
     n_models = len(models)
     if len(sorted_items) > n_models:
@@ -61,8 +70,8 @@ def animate_poly_convergence(
     iter_labels = [kv[0] for kv in sorted_items]
     n_lines = len(sorted_items)
 
-    row_lo, row_hi = row_range
-    col_lo, col_hi = col_range
+    row_lo, row_hi = a0, a1  # row_range
+    col_lo, col_hi = (b0 + b1) // 2 - 6, (b0 + b1) // 2 + 6  # col_range
     col_indices = np.arange(col_lo, col_hi)
 
     # ── precompute diff cutouts and vertical sums ────────────────────────
@@ -76,15 +85,6 @@ def animate_poly_convergence(
     vsum_margin = max((vsum_max - vsum_min) * 0.1, 1e-8)
 
     # ── precompute column sums of each model in the cutout ───────────────
-
-    a0 = int(A0_PARAMS[int(outer_key)])
-    a1 = int(A1_PARAMS[int(outer_key)]) + 1
-    b0 = int(B0_PARAMS[int(outer_key)]) - 50
-    off = 50
-    if b0 < 0:
-        off += b0
-        b0 = 0
-    b1 = int(B1_PARAMS[int(outer_key)]) + 50 + 1
 
     model_colsums = [np.nansum(m[b0:b1, a0:a1], axis=1) for m in models]
     print("model colsums:", len(model_colsums))
