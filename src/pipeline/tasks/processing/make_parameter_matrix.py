@@ -71,6 +71,27 @@ science_image: np.ndarray | None = None
 params: list[float] = []
 
 
+def combine_spaxel_jsons(output_dir: Path) -> None:
+    """Merge all per-spaxel shift/width JSONs in output_dir into combined files.
+
+    Each job writes loop_shifts_spaxel_N.json and loop_widths_spaxel_N.json.
+    Call this after all jobs finish to produce loop_shifts_editable.json and
+    loop_widths_editable.json containing every spaxel.
+    """
+    combined_shifts: dict = {}
+    combined_widths: dict = {}
+    for path in sorted(output_dir.glob("loop_shifts_spaxel_*.json")):
+        with path.open("r") as f:
+            combined_shifts.update(json.load(f))
+    for path in sorted(output_dir.glob("loop_widths_spaxel_*.json")):
+        with path.open("r") as f:
+            combined_widths.update(json.load(f))
+    with (output_dir / "loop_shifts_editable.json").open("w") as f:
+        json.dump(combined_shifts, f, indent=2)
+    with (output_dir / "loop_widths_editable.json").open("w") as f:
+        json.dump(combined_widths, f, indent=2)
+
+
 def stat_l1(sci: np.ndarray, mod: np.ndarray, sl: tuple) -> float:
     return float(np.nansum(np.abs(sci[sl] - mod[sl])))
 
@@ -117,18 +138,14 @@ def makeShiftedMat(
         curve = p(x0) + adjustmentP(x0) + off
 
         if spaxel_ID == spaxel:
-            # latest_s = str(list(shift_keys)[iteration])
             latest_s = str(max(int(k) for k in total_coeffs[str(spaxel_ID)].keys()))
-            # logger.info(f"latest shift vals: {total_coeffs[str(spaxel_ID)][latest_s]}")
             curve = curve + np.poly1d(total_coeffs[str(spaxel_ID)][latest_s])(x0)
 
         widthAdjustmentP = Polynomial(widths[spaxel_ID])
         widthVals = widthAdjustmentP(x0)
 
         if spaxel_ID == spaxel:  # doing a spaxel specific width adjustment to refine
-            # latest_w = str(list(width_keys)[iteration])
             latest_w = str(max(int(k) for k in total_widths[str(spaxel_ID)].keys()))
-            # logger.info(f"latest width vals: {total_widths[str(spaxel_ID)][latest_w]}")
             widthVals += np.poly1d(total_widths[str(spaxel_ID)][latest_w])(x0)
 
         ######################################################
@@ -258,6 +275,14 @@ def fit(matrix, image, spectra, worker="main", spaxel=0, iteration=0, param=0.0)
             key=f"model-spaxel-{spaxel}-iteration-{iteration}",
         )
 
+        zoom = np.s_[700:3000, 970:1100]
+        frob = float(np.nansum(np.asarray(fitModel)[zoom] * np.asarray(image)[zoom]))
+        create_markdown_artifact(
+            markdown=f"**Frobenius product (zoom)** spaxel={spaxel}, iteration={iteration}\n\n`{frob:.6g}`",
+            key=f"frob-spaxel-{spaxel}-iteration-{iteration}",
+            description=f"Frobenius inner product of model vs science in zoom region, spaxel={spaxel} iter={iteration}",
+        )
+
     return fitModel
 
 
@@ -350,7 +375,7 @@ def make_parameter_matrix_old(spaxels_to_process: list[int] | None = None, itera
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
     global science_image, params
-    with fits.open("/Users/anousha/Desktop/SNIFS/model/refs/deep_skyflat_coadd.fits") as hdul:
+    with fits.open("/home/anousha/snifs_model/refs/deep_skyflat_coadd.fits") as hdul:
         science_image = hdul[0].data  # type:ignore
 
     spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else [8]
@@ -366,12 +391,11 @@ def make_parameter_matrix_old(spaxels_to_process: list[int] | None = None, itera
             f"{len(spaxels_to_process) * n_params} tasks → parallel"
         )
 
-        # Build all (spax, param) tasks — independent, run in parallel.
-        # Fork inherits all module-level globals (para, science_image, total_coeffs, etc.)
-        # so workers see the current state without re-loading any data.
-        bin_stats_futures = []
+        # Each spaxel's params run in parallel; wait for all of one spaxel before moving to the next.
+        flat_results = []
         for spax in spaxels_to_process:
             spectra = np.concatenate(spec[15 * (spax // 15) : 15 * (spax // 15 + 1)])
+            spax_futures = []
             for param in params:
                 offsets = np.zeros(225)
                 widths = np.zeros(225)
@@ -383,30 +407,28 @@ def make_parameter_matrix_old(spaxels_to_process: list[int] | None = None, itera
                 fit_future = fit.submit(
                     mat_future, science_image, spectra, spaxel=spax, iteration=iteration, param=param
                 )
-                bin_stats_futures.append(compute_bin_stats.submit(fit_future, spax))
-        flat_results = [f.result() for f in bin_stats_futures]
+                spax_futures.append(compute_bin_stats.submit(fit_future, spax))
+            flat_results.extend(f.result() for f in spax_futures)
 
         l1_calculations(spaxels_to_process, flat_results, n_params, iteration, is_offset_iter)
         logger.info("L1 calculations complete")
         iteration += 1
 
-        with open("loop_shifts_editable.json", "w") as f:
-            json.dump(total_coeffs, f)
-            logger.info(f"updated loop_shifts_editable.json after iteration {iteration}")
-
-    create_markdown_artifact(
-        markdown=f"**loop_shifts_editable.json**\n\n`{os.path.abspath('loop_shifts_editable.json')}`",
-        key="wavelength-cal-shifts",
-        description="Per-spaxel shift polynomial coefficients",
-    )
-    with open("loop_widths_editable.json", "w") as f:
-        json.dump(total_widths, f)
-        logger.info("updated loop_widths_editable.json")
-    create_markdown_artifact(
-        markdown=f"**loop_widths_editable.json**\n\n`{os.path.abspath('loop_widths_editable.json')}`",
-        key="wavelength-cal-widths",
-        description="Per-spaxel width polynomial coefficients",
-    )
+    for spax in spaxels_to_process:
+        spax_shifts_path = os.path.abspath(f"loop_shifts_spaxel_{spax}.json")
+        with open(spax_shifts_path, "w") as f:
+            json.dump({str(spax): total_coeffs[str(spax)]}, f)
+        spax_widths_path = os.path.abspath(f"loop_widths_spaxel_{spax}.json")
+        with open(spax_widths_path, "w") as f:
+            json.dump({str(spax): total_widths[str(spax)]}, f)
+        create_markdown_artifact(
+            markdown=(
+                f"**Per-spaxel coefficients (spaxel {spax})**\n\n"
+                f"shifts: `{spax_shifts_path}`\n\nwidths: `{spax_widths_path}`"
+            ),
+            key=f"wavelength-cal-spaxel-{spax}",
+            description=f"Shift/width polynomial coefficients for spaxel {spax}",
+        )
 
     for spaxel in spaxels_to_process:
         spectra = np.concatenate(spec[15 * (spaxel // 15) : 15 * (spaxel // 15 + 1)])
@@ -445,7 +467,6 @@ def make_parameter_matrix_old(spaxels_to_process: list[int] | None = None, itera
             key=f"animation-spaxel-{spaxel}",
             description=f"Convergence animation for spaxel {spaxel}",
         )
-
 
 #@pipeline_flow()
 def run_make_parameter_matrix(
@@ -502,23 +523,14 @@ def run_make_parameter_matrix(
 
         iteration += 1
 
-        with open(shifts_path, "w") as f:
-            json.dump(total_coeffs, f)
-            logger.info(f"updated {shifts_path} after iteration {iteration}")
-
-    create_markdown_artifact(
-        markdown=f"**loop_shifts_editable.json**\n\n`{shifts_path}`",
-        key="wavelength-cal-shifts",
-        description="Per-spaxel shift polynomial coefficients",
-    )
-    with open(widths_path, "w") as f:
-        json.dump(total_widths, f)
-        logger.info(f"updated {widths_path}")
-    create_markdown_artifact(
-        markdown=f"**loop_widths_editable.json**\n\n`{widths_path}`",
-        key="wavelength-cal-widths",
-        description="Per-spaxel width polynomial coefficients",
-    )
+    for spax in spaxels_to_process:
+        spax_shifts_path = output_dir / f"loop_shifts_spaxel_{spax}.json"
+        with spax_shifts_path.open("w") as f:
+            json.dump({str(spax): total_coeffs[str(spax)]}, f)
+        spax_widths_path = output_dir / f"loop_widths_spaxel_{spax}.json"
+        with spax_widths_path.open("w") as f:
+            json.dump({str(spax): total_widths[str(spax)]}, f)
+    logger.info(f"Saved per-spaxel shift/width JSONs to {output_dir}")
 
     image.header.set("shift_coeff_path", str(shifts_path))
     image.header.set("width_coeff_path", str(widths_path))
@@ -565,4 +577,4 @@ def run_make_parameter_matrix(
 
 
 if __name__ == "__main__":
-    make_parameter_matrix_old()
+    make_parameter_matrix_old(list(range(120,135)), iteration_max=10)

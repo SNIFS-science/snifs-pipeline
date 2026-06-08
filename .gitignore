@@ -76,3 +76,7 @@ data/
 *.sqlite3
 
 !output/level=processed/type=CCD_ON_TIMES/times.parquet
+
+*.gif
+loop*.json
+spaxel_*_iteration_*.fits

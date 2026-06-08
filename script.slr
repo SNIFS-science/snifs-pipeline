@@ -1,0 +1,15 @@
+#!/bin/bash -l
+#SBATCH --time=24:00:00
+# #SBATCH -C gpu
+#SBATCH --account=cusp
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+# #SBATCH --gpus-per-task=1
+#SBATCH --cpus-per-task=10
+#SBATCH -o alex_wavelength_calib.out
+
+source /home/anousha/miniconda3/etc/profile.d/conda.sh
+
+conda activate base
+
+uv run python /home/anousha/snifs-pipeline/src/pipeline/tasks/processing/make_parameter_matrix.py

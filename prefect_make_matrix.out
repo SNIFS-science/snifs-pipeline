@@ -1,0 +1,28 @@
+===========================================================
+ssh -L 9999:titan1:9361 anousha@YOUR_CLUSTER_ADDRESS
+===========================================================
+
+ ___ ___ ___ ___ ___ ___ _____
+| _ \ _ \ __| __| __/ __|_   _|
+|  _/   / _|| _|| _| (__  | |
+|_| |_|_\___|_| |___\___| |_|
+
+Configure Prefect to communicate with the server with:
+
+    prefect config set PREFECT_API_URL=http://0.0.0.0:9361/api
+
+View the API reference documentation at http://0.0.0.0:9361/docs
+
+Check out the dashboard at http://0.0.0.0:9361
+
+
+
+2026-06-08 11:31:53.627 | INFO     | pipeline.tasks.processing.make_parameter_matrix:<module>:54 - Adding to existing loop_shifts_editable.json / loop_widths_editable.json
+2026-06-08 11:31:53.648 | INFO     | __main__:<module>:54 - Adding to existing loop_shifts_editable.json / loop_widths_editable.json
+11:31:53.855 | INFO    | Flow run 'vehement-petrel' - Beginning flow run 'vehement-petrel' for flow 'make-parameter-matrix-old'
+11:31:53.858 | INFO    | Flow run 'vehement-petrel' - View at http://127.0.0.1:9361/runs/flow-run/4eb30ce4-cbad-475f-ae78-bd39a8332a7c
+2026-06-08 11:31:53.862 | INFO     | __main__:make_parameter_matrix_old:389 - iteration 0, offsets, 105 tasks → parallel
+/Volumes/home/anousha/snifs-pipeline/src/pipeline/common/fitting_math__utils.py:179: RuntimeWarning: divide by zero encountered in divide
+  G = np.exp(-np.log(2) * (x - xo) ** 2 / wg**2)
+/Volumes/home/anousha/snifs-pipeline/src/pipeline/common/fitting_math__utils.py:180: RuntimeWarning: divide by zero encountered in divide
+  L = 1 / (l_off + (x - xo) ** n / wl**n)

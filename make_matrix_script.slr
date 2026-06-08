@@ -1,0 +1,32 @@
+#!/bin/bash -l
+#SBATCH --time=90:00:00
+#SBATCH --account=cusp
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=10
+#SBATCH -o prefect_make_matrix.out
+
+source /home/anousha/miniconda3/etc/profile.d/conda.sh
+conda activate base
+
+export PREFECT_HOME="/tmp/prefect_${USER}_${SLURM_JOB_ID}"
+PREFECT_PORT=$((8000 + RANDOM % 2000))
+COMPUTE_NODE=$(hostname)
+
+export PREFECT_API_URL="http://127.0.0.1:${PREFECT_PORT}/api"
+
+export PREFECT_UI_API_URL="http://127.0.0.1:9999/api"
+
+
+echo "==========================================================="
+echo "ssh -L 9999:${COMPUTE_NODE}:${PREFECT_PORT} anousha@YOUR_CLUSTER_ADDRESS"
+echo "==========================================================="
+
+export PREFECT_API_URL="http://127.0.0.1:${PREFECT_PORT}/api"
+
+uv run prefect server start --host 0.0.0.0 --port $PREFECT_PORT &
+sleep 10
+
+uv run python /home/anousha/snifs-pipeline/src/pipeline/tasks/processing/make_parameter_matrix.py
+
+uv run prefect server stop
