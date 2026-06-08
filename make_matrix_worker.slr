@@ -1,0 +1,23 @@
+#!/bin/bash -l
+# Worker job: runs make_parameter_matrix_old for one group of spaxels.
+# Submitted by make_matrix_script.slr — do not submit directly.
+#SBATCH --job-name=matrix-worker
+#SBATCH --time=90:00:00
+#SBATCH --account=cusp
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=10
+#SBATCH -o matrix_worker_%j.out
+
+source /home/anousha/miniconda3/etc/profile.d/conda.sh
+conda activate base
+
+# Pick up Prefect server address written by the master job
+source "$PREFECT_SERVER_INFO_FILE"
+export PREFECT_API_URL
+
+echo "Worker for spaxels ${SPAXEL_RANGE}, connecting to ${PREFECT_API_URL}"
+
+uv run python /home/anousha/snifs-pipeline/src/pipeline/tasks/processing/make_parameter_matrix.py \
+    --spaxels "$SPAXEL_RANGE" \
+    --output-dir "$OUTPUT_DIR"

@@ -370,7 +370,11 @@ def l1_calculations(spaxels_to_process, flat_results, n_params, iteration, is_of
 
 
 @pipeline_flow()
-def make_parameter_matrix_old(spaxels_to_process: list[int] | None = None, iteration_max: int = 14):
+def make_parameter_matrix_old(
+    spaxels_to_process: list[int] | None = None,
+    iteration_max: int = 14,
+    output_dir: Path | None = None,
+):
     shift_offsets = [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2]
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
@@ -379,6 +383,8 @@ def make_parameter_matrix_old(spaxels_to_process: list[int] | None = None, itera
         science_image = hdul[0].data  # type:ignore
 
     spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else [8]
+    out = output_dir if output_dir is not None else Path.cwd()
+    out.mkdir(parents=True, exist_ok=True)
 
     iteration = 0
     while iteration < iteration_max:
@@ -415,11 +421,11 @@ def make_parameter_matrix_old(spaxels_to_process: list[int] | None = None, itera
         iteration += 1
 
     for spax in spaxels_to_process:
-        spax_shifts_path = os.path.abspath(f"loop_shifts_spaxel_{spax}.json")
-        with open(spax_shifts_path, "w") as f:
+        spax_shifts_path = out / f"loop_shifts_spaxel_{spax}.json"
+        with spax_shifts_path.open("w") as f:
             json.dump({str(spax): total_coeffs[str(spax)]}, f)
-        spax_widths_path = os.path.abspath(f"loop_widths_spaxel_{spax}.json")
-        with open(spax_widths_path, "w") as f:
+        spax_widths_path = out / f"loop_widths_spaxel_{spax}.json"
+        with spax_widths_path.open("w") as f:
             json.dump({str(spax): total_widths[str(spax)]}, f)
         create_markdown_artifact(
             markdown=(
@@ -578,4 +584,23 @@ def run_make_parameter_matrix(
 
 
 if __name__ == "__main__":
-    make_parameter_matrix_old(list(range(120, 135)), iteration_max=10)
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--spaxels", type=str, default=None,
+                        help="Comma-separated spaxel indices, e.g. 0,1,2 or a range like 0-14")
+    parser.add_argument("--iteration-max", type=int, default=10)
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Directory to write per-spaxel JSON files (default: cwd)")
+    args = parser.parse_args()
+
+    if args.spaxels is None:
+        spaxels = list(range(120, 135))
+    elif "-" in args.spaxels and "," not in args.spaxels:
+        start, end = args.spaxels.split("-")
+        spaxels = list(range(int(start), int(end) + 1))
+    else:
+        spaxels = [int(s) for s in args.spaxels.split(",")]
+
+    output_dir = Path(args.output_dir) if args.output_dir else Path.cwd()
+    make_parameter_matrix_old(spaxels, iteration_max=args.iteration_max, output_dir=output_dir)

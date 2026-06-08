@@ -1,32 +1,75 @@
 #!/bin/bash -l
-#SBATCH --time=90:00:00
+# Master job: starts Prefect server, submits one worker per spaxel group,
+# waits for all workers to finish, combines JSONs, then shuts the server down.
+#SBATCH --job-name=prefect-master
+#SBATCH --time=96:00:00
 #SBATCH --account=cusp
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=10
-#SBATCH -o prefect_make_matrix.out
+#SBATCH --cpus-per-task=2
+#SBATCH -o prefect_master.out
 
 source /home/anousha/miniconda3/etc/profile.d/conda.sh
 conda activate base
 
-export PREFECT_HOME="/tmp/prefect_${USER}_${SLURM_JOB_ID}"
-PREFECT_PORT=$((8000 + RANDOM % 2000))
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUTPUT_DIR="/home/anousha/snifs-pipeline/output/make_matrix"
+mkdir -p "$OUTPUT_DIR"
+
+# --- Prefect server ---
+export PREFECT_HOME="/tmp/prefect_server_${USER}_${SLURM_JOB_ID}"
+PREFECT_PORT=8100
 COMPUTE_NODE=$(hostname)
+export PREFECT_API_URL="http://${COMPUTE_NODE}:${PREFECT_PORT}/api"
 
-export PREFECT_API_URL="http://127.0.0.1:${PREFECT_PORT}/api"
-
-export PREFECT_UI_API_URL="http://127.0.0.1:9999/api"
-
+SERVER_INFO_FILE="${OUTPUT_DIR}/prefect_server_info.env"
+echo "PREFECT_API_URL=http://${COMPUTE_NODE}:${PREFECT_PORT}/api" > "$SERVER_INFO_FILE"
 
 echo "==========================================================="
-echo "ssh -L 9999:${COMPUTE_NODE}:${PREFECT_PORT} anousha@YOUR_CLUSTER_ADDRESS"
+echo "Prefect server: ${COMPUTE_NODE}:${PREFECT_PORT}"
+echo "To watch the UI:  ssh -L 9999:${COMPUTE_NODE}:${PREFECT_PORT} anousha@YOUR_CLUSTER_ADDRESS"
+echo "then open:        http://localhost:9999"
 echo "==========================================================="
-
-export PREFECT_API_URL="http://127.0.0.1:${PREFECT_PORT}/api"
 
 uv run prefect server start --host 0.0.0.0 --port $PREFECT_PORT &
-sleep 10
+SERVER_PID=$!
+sleep 15
 
-uv run python /home/anousha/snifs-pipeline/src/pipeline/tasks/processing/make_parameter_matrix.py
+# --- Submit one worker job per spaxel group (15 spaxels each, 225 total) ---
+WORKER_JOB_IDS=()
+for START in $(seq 0 15 224); do
+    END=$((START + 14))
+    JOB_ID=$(sbatch --parsable \
+        --export=ALL,PREFECT_SERVER_INFO_FILE="$SERVER_INFO_FILE",SPAXEL_RANGE="${START}-${END}",OUTPUT_DIR="$OUTPUT_DIR" \
+        "${SCRIPT_DIR}/make_matrix_worker.slr")
+    WORKER_JOB_IDS+=("$JOB_ID")
+    echo "Submitted worker for spaxels ${START}-${END}: job ${JOB_ID}"
+done
 
-uv run prefect server stop
+# --- Wait for all workers ---
+echo "Waiting for ${#WORKER_JOB_IDS[@]} worker jobs..."
+while true; do
+    all_done=true
+    for JOB_ID in "${WORKER_JOB_IDS[@]}"; do
+        if squeue -j "$JOB_ID" -h &>/dev/null; then
+            all_done=false
+            break
+        fi
+    done
+    $all_done && break
+    sleep 60
+done
+echo "All workers finished."
+
+# --- Combine per-spaxel JSONs ---
+uv run python -c "
+from pathlib import Path
+from pipeline.tasks.processing.make_parameter_matrix import combine_spaxel_jsons
+combine_spaxel_jsons(Path('$OUTPUT_DIR'))
+print('Combined JSONs written to $OUTPUT_DIR')
+"
+
+# --- Shut down server ---
+kill $SERVER_PID
+wait $SERVER_PID 2>/dev/null
+echo "Prefect server stopped."

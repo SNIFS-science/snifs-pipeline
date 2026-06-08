@@ -256,15 +256,13 @@ def calibrate_wavelength_arc(arcVectorPath, lineSpreadPath):  # (arc: Preprocess
         params[i] = ps
         residuals.extend(res)
         logger.info(f"spaxel {i} done")
-    params = np.array(params)
 
-    output_path = settings.output_path / "wavelength_calibration_parameters.json"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    calibration_json = {"coefficient_order": [3, 2, 1, 0]}
-    calibration_json.update({str(i): params[i].tolist() for i in range(len(params))})
-    with output_path.open("w") as f:
-        json.dump(calibration_json, f, indent=2)
-    logger.info(f"Saved wavelength calibration parameters to {output_path}")
+        output_path = settings.output_path / f"wavelength_calibration_parameters_spaxel_{i}.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        spaxel_json = {"coefficient_order": [3, 2, 1, 0], str(i): params[i].tolist()}
+        with output_path.open("w") as f:
+            json.dump(spaxel_json, f, indent=2)
+        logger.info(f"Saved wavelength calibration parameters for spaxel {i} to {output_path}")
 
     # plot_params(params)
     logger.info("late RMS: ", np.sqrt(np.nanmean(residuals)))
