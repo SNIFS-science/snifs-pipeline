@@ -10,7 +10,6 @@ from pipeline.common.fitting_math__utils import double_gaussian, gaussian
 from pipeline.common.log import get_logger
 from pipeline.common.plotting_utils import find_closest_index, get_wavelengths_to_fit
 from pipeline.flows.preprocess_exposure import PreprocessSummary
-from pipeline.tasks.plotting.wavelength_arc_calibration_plots import plot_params, plot_refined_spectrum
 from pipeline.tasks.processing.make_parameter_matrix import repeat_shift_fit, shifting_spaxel
 from pipeline.tasks.processing.ram_tracker import MemoryMonitor
 from pipeline.tasks.processing.refine_peak_centers_quickly import double_gaussian_jac, gaussian_jac
@@ -424,7 +423,7 @@ def cal_spec(spectrum: np.ndarray, peaks_dict: dict) -> tuple[np.ndarray, np.nda
     other_new_centers, _ = refine_peak_centers_modified(spectrum, improved_peaks, window=3)
 
     # TEST
-    #plot_refined_spectrum(spectrum, other_new_centers)
+    # plot_refined_spectrum(spectrum, other_new_centers)
     x_points = np.array(range(len(spectrum)))
     wavelengths_array = np.array(wavelengths)
     p_3 = np.polyfit(other_new_centers, wavelengths_array, 3)
@@ -542,7 +541,7 @@ def calibrate_wavelength_arc(arcPath: Path) -> np.ndarray:
         residuals.extend(res)
 
     params = np.array(params)
-    #plot_params(params)  # THIS ONE
+    # plot_params(params)  # THIS ONE
     logger.info("late RMS: ", np.sqrt(np.mean(residuals)))
     # plot_spectrum(np.array(wavelength_list), flux_array) #THIS ONE SKIP FOR NOW
     # TODO: decide what we want to save and/or return
@@ -594,7 +593,7 @@ def full_arc_calibration(preprocessed_arc: PreprocessSummary) -> None:
 # TODO: this top level function should take a pydantic configuration object so it can easily integrate with prefect
 if __name__ == "__main__":
     # START TRACKING TOTAL RAM
-#CHANGE PATHS HERE
+    # CHANGE PATHS HERE
     base_dir = Path("/home/anousha/snifs-pipeline/data/level=raw")
 
     files = [
@@ -635,8 +634,8 @@ if __name__ == "__main__":
 
             CURRENT_LAP = [[], [], [], [], []]
         # for a cpu run
-#SAVE PATH FOR NPY FILE
-#CHANGE PATHS HERE
+# SAVE PATH FOR NPY FILE
+# CHANGE PATHS HERE
 np.save(
     "/home/anousha/snifs-pipeline/parallel_time_ram_spaxels_corrected_peak_RAM.npy",
     np.array(PARALLEL_TIMER, dtype=object),

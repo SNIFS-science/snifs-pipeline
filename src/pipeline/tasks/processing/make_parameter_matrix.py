@@ -103,14 +103,14 @@ def makeShiftedMat(
     assert oversample_factor > 0, "can't divide by 0"
 
     # offsests is a list of 225 offsets in the cross-dispersion direction
-    #worker = multiprocessing.current_process().name
+    # worker = multiprocessing.current_process().name
     row_start = 15 * (spaxel // 15)
     row_end = 15 * (spaxel // 15 + 1)
 
     list_huge_matrix = []
 
     for spaxel_ID in range(row_start, row_end):
-        #logger.info(f"[{worker}]   spaxel_ID={spaxel_ID}, elapsed={time.time() - start_time:.1f}s")
+        # logger.info(f"[{worker}]   spaxel_ID={spaxel_ID}, elapsed={time.time() - start_time:.1f}s")
         # create a new image
         # find the place in the image where to put the spectrum per spaxel
         a0 = int(A0_PARAMS[spaxel_ID] + yoff)
@@ -435,13 +435,12 @@ def make_parameter_matrix_old(spaxels_to_process: list[int] | None = None, itera
         mat_future = makeShiftedMat.submit(spaxel, np.zeros(225), np.zeros(225), oversample_factor=4, iteration=14)
         fit.submit(mat_future, science_image, spectra, spaxel=spaxel, iteration=14, param=0.0).result()
 
-
     iteration = iteration_max
     for spaxel in spaxels_to_process:
         print(spaxel)
         models = []
         model_iterations = [0]
-        model_iterations.extend(list(range(2, iteration+1, 2)))
+        model_iterations.extend(list(range(2, iteration + 1, 2)))
         for it in model_iterations:
             fname = f"spaxel_{spaxel}_iteration_{it}.fits"
             with fits.open(fname) as hdul:
@@ -468,7 +467,8 @@ def make_parameter_matrix_old(spaxels_to_process: list[int] | None = None, itera
             description=f"Convergence animation for spaxel {spaxel}",
         )
 
-#@pipeline_flow()
+
+# @pipeline_flow()
 def run_make_parameter_matrix(
     science_exposure_path: Path,
     output_dir: Path,
@@ -482,7 +482,7 @@ def run_make_parameter_matrix(
     global science_image, params
     image = Image.from_asdf(science_exposure_path)
     science_image = image.data
-    science_image = science_image.T # transpose to match the orientation used in the original code
+    science_image = science_image.T  # transpose to match the orientation used in the original code
 
     output_dir.mkdir(parents=True, exist_ok=True)
     shifts_path = output_dir / "loop_shifts_editable.json"
@@ -539,8 +539,9 @@ def run_make_parameter_matrix(
 
     for spaxel in spaxels_to_process:
         spectra = np.concatenate(spec[15 * (spaxel // 15) : 15 * (spaxel // 15 + 1)])
-        mat_future = makeShiftedMat.submit(spaxel, np.zeros(225), np.zeros(225),
-                                           oversample_factor=4, iteration=iteration_max)
+        mat_future = makeShiftedMat.submit(
+            spaxel, np.zeros(225), np.zeros(225), oversample_factor=4, iteration=iteration_max
+        )
         fit.submit(mat_future, science_image, spectra, spaxel=spaxel, iteration=iteration_max, param=0.0).result()
 
         models = []
@@ -577,4 +578,4 @@ def run_make_parameter_matrix(
 
 
 if __name__ == "__main__":
-    make_parameter_matrix_old(list(range(120,135)), iteration_max=10)
+    make_parameter_matrix_old(list(range(120, 135)), iteration_max=10)
