@@ -5,13 +5,13 @@ import time
 import psutil
 
 
-# This function calculates total RAM used by the script + all workers
+# this function calculates total RAM used by the script + all workers
 def get_total_mem():
-    # Identify the main Python process
+    # identify the main Python process
     main_process = psutil.Process(os.getpid())
-    # Start the counter with the main script's memory
+    # start the counter with the main script's memory
     total = main_process.memory_info().rss
-    # Find all "child" processes (the CPU workers) and add their memory
+    # find all "workers and add their memory
     for child in main_process.children(recursive=True):
         try:
             total += child.memory_info().rss
@@ -20,7 +20,7 @@ def get_total_mem():
     return total / (1024 * 1024)  # Convert bytes to Megabytes
 
 
-# This creates a new thread so I can track the memory usage of the program without stopping the program
+# this creates a new thread so I can track the memory usage of the program without stopping the program
 class MemoryMonitor(threading.Thread):
     def __init__(self, ticks_per_update=5, tick_len=1):
         super().__init__()
@@ -35,7 +35,7 @@ class MemoryMonitor(threading.Thread):
         self.bin_for_avg = []
 
     def run(self):
-        # While the pool is working, keep checking memory every 0.1 seconds
+        # while the pool is working, keep checking memory every 0.1 seconds made a mistake earlier and mad it tick len, it should really be called averaging period
         self.keep_running = True
 
         while self.keep_running:

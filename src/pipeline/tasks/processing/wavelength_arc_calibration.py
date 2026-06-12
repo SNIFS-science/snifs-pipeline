@@ -16,7 +16,7 @@ from pipeline.tasks.processing.ram_tracker import MemoryMonitor
 from pipeline.tasks.processing.refine_peak_centers_quickly import double_gaussian_jac, gaussian_jac
 from pipeline.tasks.processing.shift_optimization import shift_and_save
 
-# TIME STRUCTURE cpus: 4,6,8,10,12
+# TIME STRUCTURE cpus: 2,4,6,8,10,12
 # index structure : [0:5]
 # data structure : (total_time_list #list of 10 runs#, parallel time list #list of 10 runs#, RAM list #list of 10 runs)
 # TOTAL_ITER_DOUBLE = []
@@ -594,7 +594,7 @@ def full_arc_calibration(preprocessed_arc: PreprocessSummary) -> None:
 # TODO: this top level function should take a pydantic configuration object so it can easily integrate with prefect
 if __name__ == "__main__":
     # START TRACKING TOTAL RAM
-
+#CHANGE PATHS HERE
     base_dir = Path("C:/Users/gibis/URAP/snifs-pipeline/data/level=raw")
     # data\level=raw\runs\run_id=25_056_084\science_red.fits
     # C:\Users\gibis\URAP\snifs-pipeline\data\level=raw\runs\run_id=25_056_084\science_red.fits
@@ -623,9 +623,6 @@ if __name__ == "__main__":
         for j in range(cpu_test_range):
             PROCESSING = 2 + j * 2
 
-            if PROCESSING != 12:
-                continue
-
             for i in range(10):
                 print(f"COMMENCING RUN {i + 1}")
                 MONITOR = MemoryMonitor()
@@ -635,13 +632,14 @@ if __name__ == "__main__":
                 end = time.perf_counter()
                 print(f"TIME FOR RUN {i + 1} is {end - start}")
                 CURRENT_LAP[0].append(end - start)
-
+            #I think this should be extend maybe or parallel timer should just be a list, but it's too late now, I already wrote an inferencing file
             PARALLEL_TIMER[j].append(CURRENT_LAP)
 
             CURRENT_LAP = [[], [], [], [], []]
         # for a cpu run
         # print(f"IMPROVED RUNTIME: {np.mean([np.mean(PARALLEL_TIMER[0][i][0]) for i in range(len(PARALLEL_TIMER[0])) ])}")
-
+#SAVE PATH FOR NPY FILE
+#CHANGE PATHS HERE
 np.save(
     "C:/Users/gibis/URAP/testing_for_snifs/performance_metrics_of_alg/refine_peaks_with_jacobian/parallel_time_ram_spaxels_corrected_peak_RAM.npy",
     np.array(PARALLEL_TIMER, dtype=object),
