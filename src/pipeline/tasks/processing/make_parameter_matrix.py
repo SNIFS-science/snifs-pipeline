@@ -1,13 +1,13 @@
 import json
 import time
 from pathlib import Path
+
 import cupy as cp
-from cupyx.scipy.sparse import coo_matrix
-from scipy.sparse import coo_matrix as scipy_coo
+import cupyx.scipy.sparse as cps
 import numpy as np
+from cupyx.scipy.sparse import coo_matrix
 from numpy.polynomial import Polynomial
 from scipy import sparse
-import cupyx.scipy.sparse as cps
 
 from pipeline.common.fitting_math__utils import pseudo_voigt
 from pipeline.common.log import get_logger
@@ -30,9 +30,8 @@ from pipeline.common.model_params import (
     default_shift_offsets,
     default_width_offsets,
 )
-from pipeline.resolver.resolver import PUBLIC_PATH_MAP, get_run_id
+from pipeline.resolver.resolver import get_run_id
 from pipeline.tasks.loaders import load_images_from_file
-
 
 # load the parameterization of the properties of the optics system
 SPAXEL_BIG_CACHE = []
@@ -56,17 +55,16 @@ READOUT_NOISE = 3.0
 
 
 def pseudo_voigt_gpu(
-    x: cp.ndarray, 
-    xo: cp.ndarray | float, 
-    wg: cp.ndarray | float, 
-    wl: cp.ndarray | float, 
-    n: float, 
-    eta: float, 
-    beta: float | None = None, 
-    l_off: float = 1.0
+    x: cp.ndarray,
+    xo: cp.ndarray | float,
+    wg: cp.ndarray | float,
+    wl: cp.ndarray | float,
+    n: float,
+    eta: float,
+    beta: float | None = None,
+    l_off: float = 1.0,
 ) -> cp.ndarray:
-    """
-    VRAM-optimized pseudo-Voigt engine supporting clean 4D broadcasting
+    """VRAM-optimized pseudo-Voigt engine supporting clean 4D broadcasting
     without in-place shape mismatch errors.
     """
     if beta is None:
@@ -77,7 +75,7 @@ def pseudo_voigt_gpu(
     # --- GAUSSIAN STEP ---
     if beta != 0:
         # Standard assignment handles different shapes flawlessly
-        PV = beta * cp.exp(-cp.log(2.0) * (x - xo) ** 2 / wg ** 2)
+        PV = beta * cp.exp(-cp.log(2.0) * (x - xo) ** 2 / wg**2)
         cp.get_default_memory_pool().free_all_blocks()
 
     # --- LORENTZIAN STEP ---
@@ -85,27 +83,27 @@ def pseudo_voigt_gpu(
         base = cp.abs(x - xo)
         if n < 0:
             base = cp.maximum(base, 1e-8)
-            
+
         # Standard division allows shape (15, 1400, 1, 1) to broadcast over (15, 1400, 202, 202)
-        denom = (base ** n) / (wl ** n)
+        denom = (base**n) / (wl**n)
         del base
-        
+
         # Add the scalar offset in-place (Safe because l_off is a single scalar)
         denom += l_off
-        
+
         # Invert denom in-place using its own memory space
         cp.reciprocal(denom, out=denom)
-        
+
         # Multiply by a scalar in-place (Safe because eta is a single scalar)
         denom *= eta
-        
+
         if PV is None:
             PV = denom
         else:
             # Safe because both PV and denom are now confirmed (15, 1400, 202, 202) shapes
             PV += denom
             del denom
-            
+
         cp.get_default_memory_pool().free_all_blocks()
 
     if PV is None:
@@ -114,145 +112,42 @@ def pseudo_voigt_gpu(
     return PV
 
 
-import sys
-import gc  
-
-def compare_matrices_chunked(gpu_sparse_matrix, cpu_sparse_matrix, row_chunk_size=20):
-    """
-    Compares a GPU COO/CSR sparse matrix with a CPU Scipy sparse matrix chunk-by-chunk.
-    Heavily garbage-collected to guarantee 100% stable CPU and GPU RAM usage.
-    """
-    print("=========================================")
-    print("🔬 INITIALIZING RAM-SAFE MATRIX DIAGNOSTIC")
-    print("=========================================")
-    
-    # 1. Convert matrices to CSR format for fast row-slicing
-    print("Converting GPU matrix to CSR format...")
-    if hasattr(gpu_sparse_matrix, 'tocsr'):
-        gpu_csr = gpu_sparse_matrix.tocsr()
-    else:
-        gpu_csr = gpu_sparse_matrix
-        
-    print("Converting CPU matrix to CSR format...")
-    cpu_csr = cpu_sparse_matrix.tocsr()
-    
-    total_rows = cpu_csr.shape[0]
-    print(f"Total system rows to process: {total_rows}")
-    print(f"Processing chunk size:        {row_chunk_size} rows per iteration")
-    print("-----------------------------------------")
-    
-    # Initialize running metrics
-    running_sq_diff_sum = 0.0
-    running_sq_cpu_sum = 0.0
-    global_max_pixel_drift = 0.0
-    
-    start_time = time.time()
-    
-    # 2. Iterate through the matrix row blocks
-    for start_row in range(0, total_rows, row_chunk_size):
-        end_row = min(start_row + row_chunk_size, total_rows)
-        
-        # Slice out row chunks (lightweight views)
-        cpu_chunk_sparse = cpu_csr[start_row:end_row, :]
-        gpu_chunk_sparse = gpu_csr[start_row:end_row, :]
-        
-        # Convert ONLY this small chunk to dense arrays
-        cpu_chunk_dense = cpu_chunk_sparse.toarray()
-        
-        if hasattr(gpu_chunk_sparse, 'get'):
-            gpu_chunk_dense = gpu_chunk_sparse.toarray().get()
-        else:
-            gpu_chunk_dense = gpu_chunk_sparse.toarray()
-            
-        # 3. Calculate metrics for the current chunk
-        diff_chunk = gpu_chunk_dense - cpu_chunk_dense
-        
-        # Accumulate squares (calculated line-by-line or inline to avoid temporary array allocation)
-        running_sq_diff_sum += float(np.sum(diff_chunk ** 2))
-        running_sq_cpu_sum += float(np.sum(cpu_chunk_dense ** 2))
-        
-        chunk_max_drift = float(np.max(np.abs(diff_chunk)))
-        if chunk_max_drift > global_max_pixel_drift:
-            global_max_pixel_drift = chunk_max_drift
-            
-        # 4. Progress bar printout
-        percent_done = (end_row / total_rows) * 100
-        elapsed = time.time() - start_time
-        sys.stdout.write(
-            f"\r⏳ Progress: {percent_done:6.2f}% | Processed rows: {end_row}/{total_rows} | Elapsed: {elapsed:.1f}s"
-        )
-        sys.stdout.flush()
-
-        # =====================================================================
-        # RADICAL RAM FLUSHING BLOCK 
-        # =====================================================================
-        # Destroy all local matrix arrays completely
-        del cpu_chunk_sparse, gpu_chunk_sparse
-        del cpu_chunk_dense, gpu_chunk_dense, diff_chunk
-        
-        # Force Python to scrub the host system RAM instantly
-        gc.collect()
-        
-        # Force CuPy to reclaim GPU VRAM memory blocks
-        cp.get_default_memory_pool().free_all_blocks()
-        # =====================================================================
-
-    # 5. Finalize statistical metrics
-    sys.stdout.write("\n-----------------------------------------\n")
-    
-    total_frobenius_diff = np.sqrt(running_sq_diff_sum)
-    total_frobenius_cpu = np.sqrt(running_sq_cpu_sum)
-    
-    rel_error = (total_frobenius_diff / total_frobenius_cpu) if total_frobenius_cpu > 0 else 0.0
-    
-    print("📊 FINAL MATRIX VERIFICATION REPORT")
-    print("=========================================")
-    print(f"Total Runtime:             {time.time() - start_time:.2f} seconds")
-    print(f"Relative Structural Error: {rel_error:.6e} ({rel_error*100:.5f}%)")
-    print(f"Worst-case Pixel Drift:    {global_max_pixel_drift:.6e}")
-    print("=========================================")
-    
-    return rel_error
-
 def compare_matrices_fast_sparse(gpu_sparse_matrix, cpu_sparse_matrix):
     print("=========================================")
-    print("RUNNING ULTRA-FAST SPARSE DIAGNOSTIC")
+    print("RUNNING SPARSE Comparison")
     print("=========================================")
-    
+
     # 1. Ensure the GPU matrix is in CSR format on the device
-    if hasattr(gpu_sparse_matrix, 'tocsr'):
+    if hasattr(gpu_sparse_matrix, "tocsr"):
         gpu_csr = gpu_sparse_matrix.tocsr()
     else:
         gpu_csr = gpu_sparse_matrix
-        
+
     # 2. Compute the squared Frobenius Norm of the CPU matrix directly from its sparse data array
     # (Frobenius norm of a sparse matrix is just the sum of its squared non-zero elements!)
     cpu_csr = cpu_sparse_matrix.tocsr()
-    sq_norm_cpu = np.sum(cpu_csr.data ** 2)
-    
-    # 3. Compute the squared Frobenius Norm of the GPU matrix directly on VRAM
-    sq_norm_gpu = cp.sum(gpu_csr.data ** 2).item()
-    
+    sq_norm_cpu = np.sum(cpu_csr.data**2)
+
     # 4. Calculate the difference matrix *as a sparse matrix*
     # Moving the CPU matrix pointers to the GPU is incredibly lightweight
     print("Computing sparse matrix difference on GPU...")
-    cpu_csr_gpu = cps.csr_matrix(cpu_csr) 
-    
+    cpu_csr_gpu = cps.csr_matrix(cpu_csr)
+
     # Direct sparse subtraction (only computes elements where data exists)
     diff_sparse = gpu_csr - cpu_csr_gpu
-    
+
     # 5. Calculate final metrics
-    sq_norm_diff = cp.sum(diff_sparse.data ** 2).item()
+    sq_norm_diff = cp.sum(diff_sparse.data**2).item()
     max_pixel_drift = cp.max(cp.abs(diff_sparse.data)).item()
-    
+
     total_frobenius_diff = np.sqrt(sq_norm_diff)
     total_frobenius_cpu = np.sqrt(sq_norm_cpu)
-    
+
     rel_error = (total_frobenius_diff / total_frobenius_cpu) if total_frobenius_cpu > 0 else 0.0
-    
+
     print("FINAL MATRIX VERIFICATION REPORT")
     print("=========================================")
-    print(f"Relative Structural Error: {rel_error:.6e} ({rel_error*100:.5f}%)")
+    print(f"Relative Structural Error: {rel_error:.6e} ({rel_error * 100:.5f}%)")
     print(f"Worst-case Pixel Drift:    {max_pixel_drift:.6e}")
     print("=========================================")
     # --- Add these lines inside your fast diagnostic script ---
@@ -263,6 +158,7 @@ def compare_matrices_fast_sparse(gpu_sparse_matrix, cpu_sparse_matrix):
     print("\nGPU Sparse Matrix Non-Zero Row/Col layout:")
     print("Row indices sample (first 10):", gpu_csr.indices.get()[:10])
     return rel_error
+
 
 def psf_calculation(sum_along_cross_disp: np.ndarray) -> np.ndarray:
     """Calculate the psf.
@@ -290,18 +186,17 @@ def save_results(data: np.ndarray, filename: str) -> None:
     logger = get_logger()
     flow_run_id = get_run_id()
 
-    #REVERSE
-    #output_location = (PUBLIC_PATH_MAP[flow_run_id] / filename).resolve()
+    # REVERSE
+    # output_location = (PUBLIC_PATH_MAP[flow_run_id] / filename).resolve()
     output_location = Path("./cpu_code").resolve()
     output_location.parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving data to {output_location}")
 
     fullpath = output_location / filename
     try:
-        np.save(fullpath,data)
+        np.save(fullpath, data)
     except:
-        np.save(f"./cpu_code/{filename}",data)
-
+        np.save(f"./cpu_code/{filename}", data)
 
 
 def save_shift_results(data: np.ndarray, spaxel: int, is_translational_shift: bool) -> None:
@@ -317,8 +212,8 @@ def save_shift_results(data: np.ndarray, spaxel: int, is_translational_shift: bo
     else:
         shift_type = "width"
 
-    #REVERT
-    #flow_run_id = get_run_id()
+    # REVERT
+    # flow_run_id = get_run_id()
     flow_run_id = 0
     save_results(data, f"{shift_type}_shift_{spaxel}_{flow_run_id}.npy")
 
@@ -353,124 +248,106 @@ def make_matrix(
 
     if partial:
         grouping = spaxel // 15
-        spaxel_range = range(grouping * 15, (grouping + 1) * 15) #list 0 to 14 right now
+        spaxel_range = range(grouping * 15, (grouping + 1) * 15)  # list 0 to 14 right now
     else:
         spaxel_range = range(225)
 
-    #[spaxel index] [x] [y]
+    # [spaxel index] [x] [y]
     num_groups = 1
-    #this is just the old loop but now we do 15 spaxels at a time
+    # this is just the old loop but now we do 15 spaxels at a time
 
-    #for the future when you do mor ethan 1 group we can store the cp.linspace thing outside
+    # for the future when you do mor ethan 1 group we can store the cp.linspace thing outside
 
     gpu_start = time.time()
     group_size = 15
     for group in range(num_groups):
         print(f"evaluating {group}")
-        #get starting and ending indices for the spaxelIDs
+        # get starting and ending indices for the spaxelIDs
         start_ind = group * group_size
         end_ind = start_ind + group_size
-
 
         # find the place in the image where to put the spectrum per spaxel
         a0 = cp.array(A0_PARAMS[start_ind:end_ind] + yoff, dtype=cp.int32)
         a1 = cp.array(A1_PARAMS[start_ind:end_ind] + yoff + 1, dtype=cp.int32)
         b0 = cp.array(B0_PARAMS[start_ind:end_ind] + xoff - 50, dtype=cp.int32)
 
-
-        #make sure left side is not off the edge for te artificial bounding box
+        # make sure left side is not off the edge for te artificial bounding box
         off = cp.full(group_size, 50, dtype=cp.int32)
-        mask = (b0 < 0)
+        mask = b0 < 0
         off[mask] += b0[mask]
         b0[mask] = 0
 
-
         b1 = cp.array(B1_PARAMS[start_ind:end_ind] + xoff + 51, dtype=cp.int32)
-        cp.clip(b1, a_min=0, a_max=2048, out = b1)
+        cp.clip(b1, a_min=0, a_max=2048, out=b1)
 
-
-        #find biggest box so we can make all boxes the same size so they can just use 1 GPU instance
-        #we know a1-a0 finna be 1400 so we already have that
+        # find biggest box so we can make all boxes the same size so they can just use 1 GPU instance
+        # we know a1-a0 finna be 1400 so we already have that
         vert_span = 1400
-        cross_span = cp.max(b1-b0).item()
-        #now the cp.full mane like [1400,1400,1400...] but reshape makes it a column vector 15 row 1 col matrix
+        cross_span = cp.max(b1 - b0).item()
+        # now the cp.full mane like [1400,1400,1400...] but reshape makes it a column vector 15 row 1 col matrix
 
         vert_vec = cp.full(group_size, vert_span, dtype=cp.int16).reshape(-1, 1)
         cross_vec = cp.full(group_size, cross_span, dtype=cp.int16).reshape(-1, 1)
 
-        #row vectors with the scaling that you want so that you can make meshgrid with no loop
-        vert_scale_row = cp.linspace(0, 1, oversample_factor*vert_span, dtype=cp.float64)
-        cross_scale_row = cp.linspace(0, 1, oversample_factor*cross_span, dtype=cp.float64)
+        # row vectors with the scaling that you want so that you can make meshgrid with no loop
+        vert_scale_row = cp.linspace(0, 1, oversample_factor * vert_span, dtype=cp.float64)
+        cross_scale_row = cp.linspace(0, 1, oversample_factor * cross_span, dtype=cp.float64)
 
-        #now take the tensor product of these to make the coord grid remmeber to go up in dim we do column row
-        #cupy broadcasting will automatically extend the a0 [15,1] column vector so that it matches the dim of matrix 
+        # now take the tensor product of these to make the coord grid remmeber to go up in dim we do column row
+        # cupy broadcasting will automatically extend the a0 [15,1] column vector so that it matches the dim of matrix
         # [15,1] + [15, 1400*oversample_factor]
 
-        disp_grid = a0.reshape(-1,1) + (vert_vec * vert_scale_row)
-        cross_grid = b0.reshape(-1,1) + (cross_vec * cross_scale_row)
+        disp_grid = a0.reshape(-1, 1) + (vert_vec * vert_scale_row)
+        cross_grid = b0.reshape(-1, 1) + (cross_vec * cross_scale_row)
         del vert_scale_row
         del cross_scale_row
-        #the grids for exampel disp_grid takes in 2 indices [spaxel] [oversample index along dispersion axis]
-        #it gives you CCD subpixel that you're on
+        # the grids for exampel disp_grid takes in 2 indices [spaxel] [oversample index along dispersion axis]
+        # it gives you CCD subpixel that you're on
 
-        #now we make the polynomial change so it can handle matrices and vectors instead on GPU
-        #First we need to get spaxel dependent coefficients into cupy arrays
-        P0 = cp.broadcast_to(cp.array(QUARTIC_LINEAR_PARAMS[start_ind:end_ind])[:,None], (group_size, 1400))
-        P1 = cp.broadcast_to(cp.array(Z_1ST[start_ind:end_ind])[:,None], (group_size, 1400))
-        P2 = cp.broadcast_to(cp.array(Z_2ND[start_ind:end_ind])[:,None], (group_size, 1400))
-        P4 = cp.broadcast_to(cp.array(Z_4TH[start_ind:end_ind])[:,None], (group_size, 1400))
+        # now we make the polynomial change so it can handle matrices and vectors instead on GPU
+        # First we need to get spaxel dependent coefficients into cupy arrays
+        P0 = cp.broadcast_to(cp.array(QUARTIC_LINEAR_PARAMS[start_ind:end_ind])[:, None], (group_size, 1400))
+        P1 = cp.broadcast_to(cp.array(Z_1ST[start_ind:end_ind])[:, None], (group_size, 1400))
+        P2 = cp.broadcast_to(cp.array(Z_2ND[start_ind:end_ind])[:, None], (group_size, 1400))
+        P4 = cp.broadcast_to(cp.array(Z_4TH[start_ind:end_ind])[:, None], (group_size, 1400))
 
-        
-
-        #evaluate_batch_polynomial(vertcoord,P0,P1,P2,P4)
+        # evaluate_batch_polynomial(vertcoord,P0,P1,P2,P4)
         # print(cp.array(offsets[start_ind:end_ind]).shape)
         # offset_col = cp.broadcast(cp.array(offsets[start_ind:end_ind].T)[:,:,None],(5,15,1400))
-        
-        O1 = cp.array(offsets[start_ind:end_ind].T)[0].T[:,None]
-        O2 = cp.array(offsets[start_ind:end_ind].T)[1].T[:,None]
-        O3 = cp.array(offsets[start_ind:end_ind].T)[2].T[:,None]
-        O4 = cp.array(offsets[start_ind:end_ind].T)[3].T[:,None]
-        O5 = cp.array(offsets[start_ind:end_ind].T)[4].T[:,None]
-        
 
-        W1 = cp.array(widths[start_ind:end_ind].T)[0].T[:,None]
-        W2 = cp.array(widths[start_ind:end_ind].T)[1].T[:,None]
-        W3 = cp.array(widths[start_ind:end_ind].T)[2].T[:,None]
-        W4 = cp.array(widths[start_ind:end_ind].T)[3].T[:,None]
-        W5 = cp.array(widths[start_ind:end_ind].T)[4].T[:,None]
+        O1 = cp.array(offsets[start_ind:end_ind].T)[0].T[:, None]
+        O2 = cp.array(offsets[start_ind:end_ind].T)[1].T[:, None]
+        O3 = cp.array(offsets[start_ind:end_ind].T)[2].T[:, None]
+        O4 = cp.array(offsets[start_ind:end_ind].T)[3].T[:, None]
+        O5 = cp.array(offsets[start_ind:end_ind].T)[4].T[:, None]
 
+        W1 = cp.array(widths[start_ind:end_ind].T)[0].T[:, None]
+        W2 = cp.array(widths[start_ind:end_ind].T)[1].T[:, None]
+        W3 = cp.array(widths[start_ind:end_ind].T)[2].T[:, None]
+        W4 = cp.array(widths[start_ind:end_ind].T)[3].T[:, None]
+        W5 = cp.array(widths[start_ind:end_ind].T)[4].T[:, None]
 
-        
-        #offset is 5 numbers fsr? then put that into polynomial then broadcast across the spectrum then add to wavelength solution
+        # offset is 5 numbers fsr? then put that into polynomial then broadcast across the spectrum then add to wavelength solution
         # adjustmentP = cp.broadcast_to(cp.array(offsets[start_ind:end_ind])[:,None], (15,1400))
-        x0 = cp.arange(0,1400,1,dtype=cp.int16)
+        x0 = cp.arange(0, 1400, 1, dtype=cp.int16)
         grid_view = cp.broadcast_to(x0[None, :], (group_size, 1400))
 
-
-        #am not including global stuff right now
+        # am not including global stuff right now
         curve = (
-            P0 + O1
-            + ( (P1 + O3) * grid_view) 
-            + ( (P2 + O2) * (grid_view ** 2)) 
-            + (O4 * (grid_view ** 3))
-            + ( (P4 + O5) * (grid_view ** 4))
-            #DID NOT INCLUDE GLOBAL OFFSETS YET
+            P0
+            + O1
+            + ((P1 + O3) * grid_view)
+            + ((P2 + O2) * (grid_view**2))
+            + (O4 * (grid_view**3))
+            + ((P4 + O5) * (grid_view**4))
+            # DID NOT INCLUDE GLOBAL OFFSETS YET
         )
-        #evaluate_batch_polynomial(x0,P0,P1,P2,P4)
+        # evaluate_batch_polynomial(x0,P0,P1,P2,P4)
 
-        width_polynomial = (
-            W1
-            + (W2 * grid_view)
-            + (W3 * (grid_view ** 2))
-            + (W4 * (grid_view ** 3))
-            + (W5 * (grid_view ** 4))
-        )
+        width_polynomial = W1 + (W2 * grid_view) + (W3 * (grid_view**2)) + (W4 * (grid_view**3)) + (W5 * (grid_view**4))
 
-
-
-        #prolly faster and better for memory to make x0 from 1 list an dgrid view it
-        #[15,1400] [spax] [spec]
-
+        # prolly faster and better for memory to make x0 from 1 list an dgrid view it
+        # [15,1400] [spax] [spec]
 
         # #make wavelength spectrum box
         # c0 = (x0 - 50) * oversample_factor
@@ -480,7 +357,6 @@ def make_matrix(
 
         # c0 = cp.broadcast_to(c0[None, :], (15, 1400))
         # c1 = cp.broadcast_to(c1[None, :], (15, 1400))
-
 
         # # cp.rint().astype(cp.int16)
 
@@ -492,12 +368,11 @@ def make_matrix(
         # cp.rint(d1).astype(cp.int16)
         # cp.clip(d1, 0, 1400 * oversample_factor - 1, out=d1)
 
-        print(disp_grid.shape,cross_grid.shape)
-        #disp_grid [15,1400 *oversample] [spaxel] [y_coords] output is CCD pixel coords subpixel
-        #cross_grid is [15, max leftright spacing *oversample]  [spaxel] [x_coords] output is CCD leftright subpixel coords
+        print(disp_grid.shape, cross_grid.shape)
+        # disp_grid [15,1400 *oversample] [spaxel] [y_coords] output is CCD pixel coords subpixel
+        # cross_grid is [15, max leftright spacing *oversample]  [spaxel] [x_coords] output is CCD leftright subpixel coords
         # Create local relative steps from -50 to +50 scaled by the oversample factor
         # For oversample=2, this creates 202 elements
-
 
         # To make curve work on all simultaneous we need to also make it 4D renamed and done later
         # Take curve and width which are [15,1400] => [spax] [spectrum] [x] [y]
@@ -505,29 +380,29 @@ def make_matrix(
         # width_4D = width_polynomial[:, :, None, None]
 
         # Do the same thing for the grid distortion constants
-        QUAD_SPEC_4D  = cp.array(QUAD_SPEC[start_ind:end_ind])[:, None, None, None]
-        LIN_SPEC_4D   = cp.array(LIN_SPEC[start_ind:end_ind])[:, None, None, None]
-        LIN_CROSS_4D  = cp.array(LIN_CROSS[start_ind:end_ind])[:, None, None, None]
+        QUAD_SPEC_4D = cp.array(QUAD_SPEC[start_ind:end_ind])[:, None, None, None]
+        LIN_SPEC_4D = cp.array(LIN_SPEC[start_ind:end_ind])[:, None, None, None]
+        LIN_CROSS_4D = cp.array(LIN_CROSS[start_ind:end_ind])[:, None, None, None]
 
-        ELL_A_4D  = cp.array(ELL_A[start_ind:end_ind])[:, None, None, None]
-        ELL_B_4D  = cp.array(ELL_B[start_ind:end_ind])[:, None, None, None]
+        ELL_A_4D = cp.array(ELL_A[start_ind:end_ind])[:, None, None, None]
+        ELL_B_4D = cp.array(ELL_B[start_ind:end_ind])[:, None, None, None]
         ELL_C0_4D = cp.array(ELL_C0[start_ind:end_ind])[:, None, None, None]
         ELL_C1_4D = cp.array(ELL_C1[start_ind:end_ind])[:, None, None, None]
 
-        #I realized we artificially choose 50 as the size of the box, but in each batch to save memory and time we should find the
-        #biggest box and set the size to that.
+        # I realized we artificially choose 50 as the size of the box, but in each batch to save memory and time we should find the
+        # biggest box and set the size to that.
 
         # get max of semi and major axis
-        max_b = cp.max(ELL_B_4D).item() #spectrum
-        max_a = cp.max(ELL_A_4D).item() #crossdisp
-        
+        max_b = cp.max(ELL_B_4D).item()  # spectrum
+        max_a = cp.max(ELL_A_4D).item()  # crossdisp
+
         # add padding
         dynamic_half_box = int(np.ceil(max(max_b, max_a))) + 3
 
         c0 = (x0 - dynamic_half_box) * oversample_factor
-        c0 = cp.rint(c0) # Correctly round to nearest pixel integer
+        c0 = cp.rint(c0)  # Correctly round to nearest pixel integer
         cp.clip(c0, a_min=0, a_max=None, out=c0)
-        c0 = c0.astype(cp.int16) # Convert to integer type for indexing
+        c0 = c0.astype(cp.int16)  # Convert to integer type for indexing
 
         c1 = (x0 + dynamic_half_box) * oversample_factor
         c1 = cp.rint(c1)
@@ -537,7 +412,6 @@ def make_matrix(
         # Broadcast spectrum boundaries across spaxel matrix blocks
         c0 = cp.broadcast_to(c0[None, :], (15, 1400))
         c1 = cp.broadcast_to(c1[None, :], (15, 1400))
-
 
         # 2. Generate vertical cross-dispersion trace bounds using dynamic box size
         d0 = (curve - dynamic_half_box) * oversample_factor
@@ -557,13 +431,13 @@ def make_matrix(
         x_local = cp.arange(-dynamic_half_box, dynamic_half_box + step_size, step_size, dtype=cp.float32)
 
         # Shape: (1, 1, 202, 1) -> [spax] [spectrum] [x] [y]
-        Y_local_4D = y_local[None, None, :, None] # Shape: (1, 1, window_size_y, 1)
+        Y_local_4D = y_local[None, None, :, None]  # Shape: (1, 1, window_size_y, 1)
         # Shape: (1, 1, 1, 202) -> [spax] [spectrum] [x] [y]
-        X_local_4D = x_local[None, None, None, :] # Shape: (1, 1, 1, window_size_x)
+        X_local_4D = x_local[None, None, None, :]  # Shape: (1, 1, 1, window_size_x)
 
-        #STATIC VERSION OF CODE
+        # STATIC VERSION OF CODE
         # half_box_len = 50
-        # window_size = 2*half_box_len * oversample_factor + 2  
+        # window_size = 2*half_box_len * oversample_factor + 2
 
         # # make the oversampled boxes
         # y_local = cp.linspace(-half_box_len, half_box_len, window_size, dtype=cp.float32)
@@ -572,14 +446,13 @@ def make_matrix(
         # Y_local_4D = y_local[None, None, :, None]
         # X_local_4D = x_local[None, None, None, :]
 
-
         # the spec_trace tells you how much does x move as you change y it makes the smile
-        #cross trace tells you how much does y change as you move accross the cross dispersion direction 
+        # cross trace tells you how much does y change as you move accross the cross dispersion direction
         spec_trace = QUAD_SPEC_4D * (Y_local_4D**2) + LIN_SPEC_4D * Y_local_4D
         cross_trace = LIN_CROSS_4D * X_local_4D
 
         # make the warped coordinate matrices
-        # xiii is the same 4D shape, but it outputs the distorted oversampled grid position 
+        # xiii is the same 4D shape, but it outputs the distorted oversampled grid position
         # which has a unique warping for every single spaxel and wavelength
         xiii = X_local_4D - spec_trace
         yiii = Y_local_4D - cross_trace
@@ -599,54 +472,55 @@ def make_matrix(
         # print(cp.mean(ELL_A_4D))
         # print(cp.std(ELL_A_4D))
 
-
         mask_footprint = (
-            cp.sqrt(
-                ((Y_local_4D - ELL_C1_4D) ** 2 / (ELL_B_4D ** 2)) +
-                ((X_local_4D - ELL_C0_4D) ** 2 / (ELL_A_4D ** 2))
-            ) < 1
+            cp.sqrt(((Y_local_4D - ELL_C1_4D) ** 2 / (ELL_B_4D**2)) + ((X_local_4D - ELL_C0_4D) ** 2 / (ELL_A_4D**2)))
+            < 1
         )
-        #for group 1 this used to be 15 spaxels, 1400, spectra, 201 grid by 201 grid now for group 1 it is 149 by 149
+        # for group 1 this used to be 15 spaxels, 1400, spectra, 201 grid by 201 grid now for group 1 it is 149 by 149
 
+        # delete uneeded variables bc memory on gpu not enough
         del spec_trace, cross_trace, x_local, y_local
         del QUAD_SPEC_4D, LIN_SPEC_4D, LIN_CROSS_4D
         del ELL_A_4D, ELL_B_4D, ELL_C0_4D, ELL_C1_4D
         del Y_local_4D, X_local_4D
-        
-        # Flush the pool immediately so this freed space is ready for use
+
         cp.get_default_memory_pool().free_all_blocks()
 
+        # reference code
+        # wavelength_dep_width = float(width_polynomial(spec_element))
+        # spectral = 0.8 * pseudo_voigt(
+        #     np.abs(xiii), 0, 0.6 * wavelength_dep_width, 1.3 * wavelength_dep_width, 5.4, 0.6
+        # ) + pseudo_voigt(np.abs(xiii), 0, 1.2, 0.2, -n_spec, 0.1, beta=0)
+        # crossdis = 0.99 * pseudo_voigt(
+        #     np.abs(yiii), 0, 0.6 * wavelength_dep_width, 1.4 * wavelength_dep_width, 5.2, 0.6
+        # ) + pseudo_voigt(np.abs(yiii), 0, 1.2, 0.1, -n_cross, 0.1, beta=0, l_off=10)
 
-        # --- 1. EVALUATE THE INTENSITY PROFILE IN 4D (GPU Vectorized) ---
-        # Width polynomial shape from your code: (15, 1400) -> Reshape to (15, 1400, 1, 1)
+        # make all the things so it's spaxel, wavelength, minigrid
+        # Width polynomial shape: (15, 1400) -> Reshape to (15, 1400, 1, 1)
         w_4d = width_polynomial[:, :, None, None]
 
-        # Evaluate Pseudo-Voigt along the warped horizontal axis (xiii is shape 15 x 1400 x 202 x 202)
-        # (Using placeholder coefficients matching your original script)
-        # --- OPTIMIZED MEMORY BLOCK ---
+        # eval pseudo voigt along the xiii (15 x 1400 x 202 x 202)
 
-        # 1. Take the absolute value in-place if you don't need raw xiii later,
-        # OR calculate it once to avoid repeating cp.abs() allocations
+        # delete variables as they're not needed
+
+        # swap this to inplace later
         abs_xiii = cp.abs(xiii)
         del xiii
         cp.get_default_memory_pool().free_all_blocks()
-        # 2. Evaluate the first component directly into the spectral variable
+        # same inputs as the spectral for cpu
+        # run unit tests to see if pseudo voigt gpu and pseudo voigt gpu give the same numbers
         spectral = 0.8 * pseudo_voigt_gpu(abs_xiii, 0, 0.6 * w_4d, 1.3 * w_4d, 5.4, 0.6)
 
-        # Flush any temporary garbage allocations created inside the first function call
         cp.get_default_memory_pool().free_all_blocks()
 
-        # 3. Use IN-PLACE addition (+=) for the second component.
-        # This forces CuPy to add the values directly to the existing 'spectral' matrix 
-        # rather than creating a massive new temporary staging array.
+        # use inplace addition to avoid using more memory also same inputs as the reference code
         spectral += pseudo_voigt_gpu(abs_xiii, 0, 1.2, 0.2, -n_spec, 0.1, beta=0)
 
-        # Clean up abs_xiii immediately if you are done with it
+        # get rid of xiii
         del abs_xiii
         cp.get_default_memory_pool().free_all_blocks()
 
-
-        # --- REPEAT THE STRATEGY FOR CROSSDIS ---
+        # repeat the same thing as above but for y
         abs_yiii = cp.abs(yiii)
         del yiii
         cp.get_default_memory_pool().free_all_blocks()
@@ -657,185 +531,189 @@ def make_matrix(
         del abs_yiii
         cp.get_default_memory_pool().free_all_blocks()
 
+        # spectral should be  (15, 1400, 202, 202)
 
-        # We slice along the first axis (Axis 0) to separate the spaxels.
-        # 'spectral[i]' will yield a 3D tensor of shape (1400, 202, 202)
-        
-        #RENABLE
+        # RENABLE
         # for i in range(group_size):
         #     # Calculate the true global spaxel ID matching your dataset
         #     global_spaxel_id = start_ind + i
-            
+
         #     # Check against your exclusion condition:
         #     # Skip saving if this global index matches the offset 'spaxel' variable
         #     if 'spaxel' in locals() and global_spaxel_id == spaxel:
         #         print(f"Skipping cache for offset spaxel: {global_spaxel_id}")
         #         continue
-                
+
         #     # Double-check that our target index fits within your 15-slot global cache bounds
         #     if global_spaxel_id < len(SPAXEL_BIG_CACHE):
         #         # 1. Slice out the 3D data slice on the GPU
         #         gpu_spaxel_slice = spectral[i]
-                
+
         #         # 2. Pull the data from GPU VRAM to Host CPU RAM using .get()
         #         # We save it as standard 32-bit float array
         #         SPAXEL_BIG_CACHE[global_spaxel_id] = gpu_spaxel_slice.get()
-                
+
         # Clean up any temporary indexing references
-        if 'gpu_spaxel_slice' in locals():
+        if "gpu_spaxel_slice" in locals():
             del gpu_spaxel_slice
         cp.get_default_memory_pool().free_all_blocks()
         # =====================================================================
-        # Combine axes and apply the mask (all shapes broadcast cleanly to 15 x 1400 x 202 x 202)
-        
-        # 1. Multiply the transposed cross-dispersion profile directly into spectral
-        if 'crossdis' in locals() and crossdis is not None:
+        # combine axes and apply the mask  (15 x 1400 x 202 x 202)
+
+        # have not gotten to check things below here yet
+        # reference
+        # model = spectral * crossdis.T * (mask_footprint.T * 1.0)
+        # model = model / np.max(model)
+        # doing transpose on cross dis flips the last two axis because it's the small grid on cpu code
+        # on gpu code it's swapping 3 and 2
+        if "crossdis" in locals() and crossdis is not None:
             spectral *= cp.transpose(crossdis, (0, 1, 3, 2))
             try:
                 del crossdis
             except NameError:
                 pass
-        
+        else:
+            raise RuntimeError("Cross dispersion is not defined")
+
         cp.get_default_memory_pool().free_all_blocks()
 
-        # 2. Multiply the physical boundary footprint mask directly in-place
-        if 'mask_footprint' in locals() and mask_footprint is not None:
-            spectral *= mask_footprint
+        # multiply with the mask same reasoning for transpose as before
+        if "mask_footprint" in locals() and mask_footprint is not None:
+            spectral *= cp.transpose(mask_footprint, (0, 1, 3, 2))
             try:
                 del mask_footprint
             except NameError:
                 pass
-                
+        else:
+            raise RuntimeError("check why maskfootprintn is NONE or out of scope")
         cp.get_default_memory_pool().free_all_blocks()
 
         # 3. Final model assignment
         model_4d = spectral
         # =====================================================================
 
-        # Right after calculating 'model_4d = spectral * crossdis_T * mask_T'
+        # now we don't need spectral
         del spectral
 
-        # Normalize each individual 2D droplet profile by its own maximum
-        # We find the max along the spatial axes (2 and 3) and keep dimensions for division
-        max_per_droplet = cp.max(model_4d, axis=(2, 3), keepdims=True)
-        # Avoid division by zero for unilluminated spaxels
-        max_per_droplet = cp.where(max_per_droplet == 0, 1.0, max_per_droplet)
-        model_4d /= max_per_droplet
+        # reference
+        # testModel = (
+        #     model.reshape((model.shape[0] // oversample_factor, oversample_factor, -1, oversample_factor))
+        #     .sum(axis=3)
+        #     .sum(axis=1)
+        # )
 
+        # # image[a0:a1,b0:b1][c0:c1,d0:d1] = model.T
+        # sum_cross_disp_axis = np.sum(testModel, axis=1)
+        # line_profile.append(psf_calculation(sum_cross_disp_axis))
 
-        # --- 2. DOWNSAMPLE FROM OVERSAMPLED TO REAL CCD PIXELS (GPU Block Sum) ---
-        # Shape conversion: (15, 1400, 202, 202) -> (15, 1400, 101, 2, 101, 2)
-        # --- 2. DOWNSAMPLE FROM OVERSAMPLED TO REAL CCD PIXELS (GPU Block Sum) ---
+        # now we have to downsample back to ccd coords
+        # I think the shape needs to go from (15, 1400, 202, 202) -> (15, 1400, 101, 2, 101, 2)
+        # so the 101 defines the actual pixels then within that the 2s give subpixel arrangment
+        # Hsub is model.shape[0] W_sub is tehcnically should be the same but what
+        #  if we want to make boxes different like rectangles with dynamic ranging
         H_sub, W_sub = model_4d.shape[2], model_4d.shape[3]
-        
-        # 1. Dynamically calculate the even dimension boundaries
-        # If H_sub is 75, (75 // 2) * 2 = 74. This trims the odd 75th row off safely.
-        H_even = (H_sub // oversample_factor) * oversample_factor
-        W_even = (W_sub // oversample_factor) * oversample_factor
-        
+
+        # # calculate the boundaries I forgot why I added this
+        # # make H and W even numbers so when
+        # H_even = (H_sub // oversample_factor) * oversample_factor
+        # W_even = (W_sub // oversample_factor) * oversample_factor
+
         # 2. Calculate the final real CCD pixel dimensions
-        H_real = H_even // oversample_factor
-        W_real = W_even // oversample_factor
+        H_real = H_sub // oversample_factor
+        W_real = W_sub // oversample_factor
 
-        # 3. Slice model_4d down to its even bounds so it reshapes flawlessly.
-        # This takes 0 bytes of extra VRAM because slicing creates a view, not a copy!
-        model_4d_even = model_4d[:, :, :H_even, :W_even]
-
-        # 4. Perform your block-sum reduction smoothly
-
-        pixel_area_factor = oversample_factor ** 2
+        # (15, 1400, 101, 2, 101, 2)
         testModel_4d = model_4d_even.reshape(
             group_size, 1400, H_real, oversample_factor, W_real, oversample_factor
-        ).sum(axis=(3, 5)) / (oversample_factor ** 2)
-        # The resulting testModel_4d has a perfect shape of: (15, 1400, H_real, W_real)
-        
+        ).sum(axis=(3, 5))
+        # testModel_4d (15, 1400, H_real, W_real) check if H_real and W_real are 101
+
         # 5. Clean up old references
         del model_4d, model_4d_even
-        if 'mask_footprint' in locals():
+        if "mask_footprint" in locals():
             del mask_footprint
 
-        # --- 3. FAST GLOBAL COORDINATE GENERATION ---
-        # Instead of slicing rowindex/columnindex per iteration, we calculate the absolute 
-        # CCD pixel coordinates for every element inside our 4D tensor via broadcasting.
+        # 3 don't use slicing
 
-        # Create a local grid tracking the downsampled indices within the 101x101 patch
+        # create a local grid tracking the downsampled indices within the 101x101 patch
         # Shapes: (101, 1) and (1, 101)
-        # 1. Create 1D local steps (assuming H_real and W_real are both 101)
+        # assuming H_real and W_real are both 101 so if above step is wrong this one is too
         local_y_1d = cp.arange(H_real, dtype=cp.int32)
         local_x_1d = cp.arange(W_real, dtype=cp.int32)
 
-        # 2. Turn them into a 2D local grid patch (Shape: 101 x 101)
         # local_Y counts vertically down rows, local_X counts horizontally across columns
-        local_Y, local_X = cp.meshgrid(local_y_1d, local_x_1d, indexing='ij')
+        local_Y, local_X = cp.meshgrid(local_y_1d, local_x_1d, indexing="ij")
 
-        # 3. Inflate them to 4D space by adding spaxel and wavelength slots
-        # Shape of both becomes: (1, 1, 101, 101)
+        # reshape so they can be broadcast to fit with the spaxel and wavelength for first 2 coords (1, 1, 101, 101)
         local_Y_4d = local_Y[None, None, :, :]
         local_X_4d = local_X[None, None, :, :]
 
-        # 4. Calculate the global positions
+        #
+        # c0 = c0 // oversample_factor
+        # c1 = c1 // oversample_factor
+        # d0 = d0 // oversample_factor
+        # d1 = d1 // oversample_factor
+        #             row = rowind[mask_val[: len(rowind), : len(rowind.T)]]
+        # colind = columnindex[a0:a1, b0:b1][c0:c1, d0:d1]
+        # col = colind[mask_val[: len(rowind), : len(rowind.T)]]
+
+        # data = testModel.T[: len(rowind), : len(rowind.T)][mask_val[: len(rowind), : len(rowind.T)]]
+        # s_image = sparse.csr_matrix((data, (col, row)), shape=(4096, 2048))
         # The addition will now naturally produce the perfect (15, 1400, 101, 101) shape
         global_rows = (d0 // oversample_factor)[:, :, None, None] + local_Y_4d
         global_cols = (c0 // oversample_factor)[:, :, None, None] + local_X_4d
 
-        # --- 4. THRESHOLD AND MASK EXTRACTION ---
-        # Find which sub-pixels across the entire batch actually contain data
+        # below this is noise? happens in cpu code so
         mask_val = testModel_4d > 1e-4
 
-        # Extract non-zero data values and their matching global coordinates directly 
-        # as flat 1D arrays on the GPU
+        # apply mask
         sparse_data = testModel_4d[mask_val]
         sparse_rows = global_rows[mask_val]
         sparse_cols = global_cols[mask_val]
 
-
-        # --- 5. COMPILING THE GLOBAL SPARSE SYSTEM ---
-        # Map the 2D pixel coordinates (0-4095, 0-2047) to a flattened 1D index
+        # start witht he flattened coordinates at the end (0-4095, 0-2047) to a flattened 1D index
         flat_ccd_indices = sparse_rows * 2048 + sparse_cols
 
         # Map each spaxel and wavelength to a unique row index in your final design matrix
         # Equation: row_idx = spaxel_ID * 1400 + wavelength_bin
-        spaxel_indices = cp.arange(group_size)[:, None] + start_ind
-        wavelength_indices = cp.arange(1400)[None, :]
-        
-        # 1. Create the base 2D mapping (Shape: 15, 1400)
+        spaxel_indices = (
+            cp.arange(group_size)[:, None] + start_ind
+        )  # (15, tbd) add start_ind because if we're not in group 0
+        wavelength_indices = cp.arange(1400)[None, :]  # (tbd but should become 15,1400 )
+
+        #  each spectrum needs 1400 indices of space the adding wavelength indices will make each spectrum count up normally
+        # so now we have [0-1399, 1400 - 2799, ...] 15 of these
         global_design_rows_2d = spaxel_indices * 1400 + wavelength_indices
-        
-        # 2. Add empty dimensions to inflate it to 4D (Shape: 15, 1400, 1, 1)
+
+        # now add the oversampled subgrid (15, 1400, 1, 1)
         global_design_rows_4d_base = global_design_rows_2d[:, :, None, None]
-        
-        # 3. Fully broadcast it to match the exact shape of your mask_val (Shape: 15, 1400, 101, 101)
-        # (Assuming H_real and W_real are both 101)
+
+        # (assuming H_real and W_real are both 101)
         global_design_rows_4d = cp.broadcast_to(global_design_rows_4d_base, (group_size, 1400, H_real, W_real))
-        
-        # 4. Now apply the 4D boolean mask flawlessly!
+
+        # Now apply the mask
         sparse_design_rows = global_design_rows_4d[mask_val]
 
-        # Clean up temporary 4D tracking structures from memory pool
+        # free memory
         del global_design_rows_4d_base, global_design_rows_4d
         cp.get_default_memory_pool().free_all_blocks()
 
-
         # Build the final massive Sparse Matrix directly in GPU Memory!
         batch_sparse_matrix = coo_matrix(
-            (sparse_data, (sparse_design_rows, flat_ccd_indices)), 
-            shape=(group_size * 1400, 4096 * 2048)
+            (sparse_data, (sparse_design_rows, flat_ccd_indices)), shape=(group_size * 1400, 4096 * 2048)
         )
         gpu_done = time.time()
 
         cpu_start = time.time()
 
-
-
-    
-    for spaxel_ID in spaxel_range: #looping thru them rn
+    for spaxel_ID in spaxel_range:  # looping thru them rn
         logger.info(f"starting spaxel {spaxel_ID}, total time = {time.time() - start_time}")
         # find the place in the image where to put the spectrum per spaxel
-        a0 = int(A0_PARAMS[spaxel_ID] + yoff)    
+        a0 = int(A0_PARAMS[spaxel_ID] + yoff)
         a1 = int(A1_PARAMS[spaxel_ID] + yoff) + 1
         b0 = int(B0_PARAMS[spaxel_ID] + xoff - 50)
 
-        #make sure left side is not off the edge for te artificial bounding box
+        # make sure left side is not off the edge for te artificial bounding box
         off = 50
         if b0 < 0:
             off += b0
@@ -843,7 +721,7 @@ def make_matrix(
 
         b1 = int(B1_PARAMS[spaxel_ID] + xoff + 50) + 1
 
-        #make a grid in the bounding box range that is finer mesh by the oversample factor
+        # make a grid in the bounding box range that is finer mesh by the oversample factor
         xsub = np.linspace(0, a1 - a0 - 1, (a1 - a0) * oversample_factor)
         ysub = np.linspace(0, b1 - b0 - 1, (b1 - b0) * oversample_factor)
 
@@ -853,7 +731,7 @@ def make_matrix(
         print("b1",b1)
         print("xsub",xsub)
         print("ysub",ysub)"""
-        #MAKE coordinate grid
+        # MAKE coordinate grid
         xv_sub, yv_sub = np.meshgrid(ysub, xsub)
 
         ##########################################################################
@@ -960,18 +838,18 @@ def make_matrix(
             list_huge_matrix.append(s_image)
 
     if not partial:
-        flow_run_id = 0#REVERSE
+        flow_run_id = 0  # REVERSE
         save_results(np.vstack(line_profile), f"line_spread_{flow_run_id}.npy")
     pass
-    
+
     huge_matrix = sparse.vstack(list_huge_matrix)
     cpu_done = time.time()
 
-    print(f"GPU time = {gpu_done-gpu_start}")
-    print(f"between time = {cpu_start-gpu_done}")
-    print(f"CPU time = {cpu_done-cpu_start}")
+    print(f"GPU time = {gpu_done - gpu_start}")
+    print(f"between time = {cpu_start - gpu_done}")
+    print(f"CPU time = {cpu_done - cpu_start}")
 
-    print(compare_matrices_fast_sparse(batch_sparse_matrix,huge_matrix))
+    print(compare_matrices_fast_sparse(batch_sparse_matrix, huge_matrix))
 
     quit()
     return huge_matrix  # type: ignore
@@ -1023,7 +901,7 @@ def fit(
         numpy.ndarray: array of normalized chi-squared values per height bin.
     """  # noqa: D205
     assert 4096 % num_height_bins == 0, "num_height_bins must be a factor of 4096"
-    data_to_fit_to = load_images_from_file(data_image)[0].data.T #Maybe this was me REVERSE
+    data_to_fit_to = load_images_from_file(data_image)[0].data.T  # Maybe this was me REVERSE
     if partial:
         spectrum = np.concatenate(spectrum[15 * (spaxel // 15) : 15 * (spaxel // 15 + 1)])
     else:
@@ -1046,9 +924,9 @@ def fit(
 
     # load an example SNIFS file, the file should be preprocessed
     # make a mask for all pixels containing signal from the model
-    flag = (model_image > 0.0) & np.isfinite(data_to_fit_to).T #REVERSE
+    flag = (model_image > 0.0) & np.isfinite(data_to_fit_to).T  # REVERSE
     flag = np.array(flag.astype(float))
-    masked_image_to_fit_to = np.where(flag, data_to_fit_to.T, 0.0) #REVERSE
+    masked_image_to_fit_to = np.where(flag, data_to_fit_to.T, 0.0)  # REVERSE
 
     # bring the image into the right shape for fitting
     flat_image = masked_image_to_fit_to.flatten()
@@ -1059,7 +937,7 @@ def fit(
 
     # do the final fit using scipy
     from scipy.sparse.linalg import lsqr
-    
+
     lsqr_start = time.time()
     fit_vector, _, _, _ = lsqr(matrix, fl)[:4]
 
@@ -1067,9 +945,8 @@ def fit(
 
     print(f"LSQR TOOK {(lsqr_start - lsqr_end):.4f} seconds")
     if not partial:
-        flow_run_id = 0 #REVERSE
+        flow_run_id = 0  # REVERSE
         save_results(fit_vector, f"fit_vector_{flow_run_id}.npy")
-
 
     stop = time.time()
 
@@ -1162,7 +1039,7 @@ if __name__ == "__main__":
 
     # TODO: use Sam's Preprocess Summary class to identify the type of image
     # TODO: check which file to use and make this a path argument? (idk if that works with pkls)
-    #C:\Users\gibis\URAP\snifs-pipeline\src\pipeline\tasks\processing\arc_frame_spectrum.json
+    # C:\Users\gibis\URAP\snifs-pipeline\src\pipeline\tasks\processing\arc_frame_spectrum.json
     with open("C:/Users/gibis/URAP/snifs-pipeline/src/pipeline/tasks/processing/arc_frame_spectrum.json", "r") as f:
         data = json.load(f)
         spec = np.array(data)
@@ -1190,4 +1067,4 @@ if __name__ == "__main__":
         data_path = Path(file)
         assert Path(file).exists(), f"File {file} does not exist."
 
-        repeat_shift_fit(list(range(5, 8)), offsets, True, data_path, spec,oversample_factor=2)
+        repeat_shift_fit(list(range(5, 8)), offsets, True, data_path, spec, oversample_factor=2)
