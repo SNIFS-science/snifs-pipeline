@@ -12,8 +12,9 @@
 source /home/anousha/miniconda3/etc/profile.d/conda.sh
 conda activate base
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="/home/anousha/snifs-pipeline"
 OUTPUT_DIR="/home/anousha/snifs-pipeline/output/make_matrix"
+cd "$SCRIPT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
 # --- Prefect server ---
@@ -21,6 +22,8 @@ export PREFECT_HOME="/tmp/prefect_server_${USER}_${SLURM_JOB_ID}"
 PREFECT_PORT=8100
 COMPUTE_NODE=$(hostname)
 export PREFECT_API_URL="http://${COMPUTE_NODE}:${PREFECT_PORT}/api"
+# Tell the UI's JavaScript to reach the API through the SSH tunnel, not directly
+export PREFECT_UI_API_URL="http://localhost:9999/api"
 
 SERVER_INFO_FILE="${OUTPUT_DIR}/prefect_server_info.env"
 echo "PREFECT_API_URL=http://${COMPUTE_NODE}:${PREFECT_PORT}/api" > "$SERVER_INFO_FILE"
@@ -31,6 +34,8 @@ echo "To watch the UI:  ssh -L 9999:${COMPUTE_NODE}:${PREFECT_PORT} anousha@YOUR
 echo "then open:        http://localhost:9999"
 echo "==========================================================="
 
+# Pre-build the venv so worker nodes don't need PyPI access
+uv sync
 uv run prefect server start --host 0.0.0.0 --port $PREFECT_PORT &
 SERVER_PID=$!
 sleep 15
@@ -62,7 +67,8 @@ done
 echo "All workers finished."
 
 # --- Combine per-spaxel JSONs ---
-uv run python -c "
+cd /home/anousha/snifs-pipeline
+uv run --no-sync python -c "
 from pathlib import Path
 from pipeline.tasks.processing.make_parameter_matrix import combine_spaxel_jsons
 combine_spaxel_jsons(Path('$OUTPUT_DIR'))

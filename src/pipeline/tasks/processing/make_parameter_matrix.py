@@ -96,23 +96,25 @@ def stat_l1(sci: np.ndarray, mod: np.ndarray, sl: tuple) -> float:
     return float(np.nansum(np.abs(sci[sl] - mod[sl])))
 
 
-@pipeline_task()
-def makeShiftedMat(
-    spaxel: int, offsets: np.ndarray, widths: np.ndarray, oversample_factor: int = 1, iteration: int = 0
-):
-    assert oversample_factor > 0, "can't divide by 0"
+def _build_spaxel_rows(
+    spaxel_IDs: list[int],
+    row_start: int,
+    offset_per_id: dict[int, float],
+    width_per_id: dict[int, float],
+    oversample_factor: int,
+    use_total_coeffs_for: int | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build COO triplets for a subset of spaxel rows.
 
-    # offsests is a list of 225 offsets in the cross-dispersion direction
-    # worker = multiprocessing.current_process().name
-    row_start = 15 * (spaxel // 15)
-    row_end = 15 * (spaxel // 15 + 1)
+    offset_per_id / width_per_id: scalar offset/width adjustment per spaxel_ID.
+    use_total_coeffs_for: if not None, apply total_coeffs/total_widths lookup for that spaxel_ID.
+    Returns (data, rows, cols) ready for sparse.csr_matrix construction.
+    """
+    all_data: list = []
+    all_rows: list = []
+    all_cols: list = []
 
-    list_huge_matrix = []
-
-    for spaxel_ID in range(row_start, row_end):
-        # logger.info(f"[{worker}]   spaxel_ID={spaxel_ID}, elapsed={time.time() - start_time:.1f}s")
-        # create a new image
-        # find the place in the image where to put the spectrum per spaxel
+    for spaxel_ID in spaxel_IDs:
         a0 = int(A0_PARAMS[spaxel_ID] + yoff)
         a1 = int(A1_PARAMS[spaxel_ID] + yoff) + 1
         b0 = int(B0_PARAMS[spaxel_ID] + xoff - 50)
@@ -120,47 +122,41 @@ def makeShiftedMat(
         if b0 < 0:
             off += b0
             b0 = 0
-
         b1 = int(B1_PARAMS[spaxel_ID] + xoff + 50) + 1
 
-        # try:
         xsub = np.linspace(0, a1 - a0 - 1, (a1 - a0) * oversample_factor)
         ysub = np.linspace(0, b1 - b0 - 1, (b1 - b0) * oversample_factor)
-
         xv_sub, yv_sub = np.meshgrid(ysub, xsub)
 
-        # we will model 1400 spectral elements for each spaxel in the blue cube
+        rowind_slab = rowindex[a0:a1, b0:b1]
+        colind_slab = columnindex[a0:a1, b0:b1]
+
         x0 = np.arange(0, 1400, 1)
 
         p = Polynomial([QUARTIC_LINEAR_PARAMS[spaxel_ID], Z_1ST[spaxel_ID], Z_2ND[spaxel_ID], 0, Z_4TH[spaxel_ID]])
-        adjustmentP = Polynomial(offsets[spaxel_ID])
-
+        adjustmentP = Polynomial([offset_per_id.get(spaxel_ID, 0.0)])
         curve = p(x0) + adjustmentP(x0) + off
 
-        if spaxel_ID == spaxel:
+        if use_total_coeffs_for == spaxel_ID:
             latest_s = str(max(int(k) for k in total_coeffs[str(spaxel_ID)].keys()))
             curve = curve + np.poly1d(total_coeffs[str(spaxel_ID)][latest_s])(x0)
 
-        widthAdjustmentP = Polynomial(widths[spaxel_ID])
+        widthAdjustmentP = Polynomial([width_per_id.get(spaxel_ID, 0.0)])
         widthVals = widthAdjustmentP(x0)
 
-        if spaxel_ID == spaxel:  # doing a spaxel specific width adjustment to refine
+        if use_total_coeffs_for == spaxel_ID:
             latest_w = str(max(int(k) for k in total_widths[str(spaxel_ID)].keys()))
             widthVals += np.poly1d(total_widths[str(spaxel_ID)][latest_w])(x0)
 
-        ######################################################
+        local_spaxel_idx = spaxel_ID - row_start
+
         for spec_element in range(0, 1400):
-            # the per spaxel per wavelength model will be in this box:
             c0 = int(spec_element - 50) * oversample_factor
             if c0 < 0:
                 c0 = 0
             c1 = int(spec_element + 50) * oversample_factor
             if c1 >= 1400 * oversample_factor:
                 c1 = int(1400 * oversample_factor)
-
-            ##########################################################################
-            # the monochromatic image for spaxel with number spaxel_ID can be found in this box.
-            # image[a0:a1,b0:b1][c0:c1,int(curve[spec_element]-50):int(curve[spec_element]+50)]
 
             d0 = int(round((curve[spec_element] - 50))) * oversample_factor
             if d0 < 0:
@@ -172,22 +168,19 @@ def makeShiftedMat(
             xv_sub_mono = xv_sub[c0:c1, d0:d1]
             yv_sub_mono = yv_sub[c0:c1, d0:d1]
 
-            # make the model ########################################
-            popt = [0, 0]  # a way to allow for a shift.
-            # redefine x and y
             y = yv_sub_mono.T[0] - spec_element
             x = xv_sub_mono[0] - curve[spec_element]
 
-            spec_trace = QUAD_SPEC[spaxel_ID] * y**2 + LIN_SPEC[spaxel_ID] * y + popt[0]
-            cross_trace = LIN_CROSS[spaxel_ID] * x + popt[1]
+            spec_trace = QUAD_SPEC[spaxel_ID] * y**2 + LIN_SPEC[spaxel_ID] * y
+            cross_trace = LIN_CROSS[spaxel_ID] * x
 
             xiii = (xv_sub_mono - curve[spec_element]).T - spec_trace
             yiii = (yv_sub_mono - spec_element) - cross_trace
 
             mask_footprint = (
                 np.sqrt(
-                    (yv_sub_mono - spec_element - ELL_C1[spaxel_ID] - popt[1]) ** 2 / ELL_B[spaxel_ID] ** 2
-                    + (xv_sub_mono - curve[spec_element] - ELL_C0[spaxel_ID] - popt[0]) ** 2 / ELL_A[spaxel_ID] ** 2
+                    (yv_sub_mono - spec_element - ELL_C1[spaxel_ID]) ** 2 / ELL_B[spaxel_ID] ** 2
+                    + (xv_sub_mono - curve[spec_element] - ELL_C0[spaxel_ID]) ** 2 / ELL_A[spaxel_ID] ** 2
                 )
                 < 1
             )
@@ -210,28 +203,92 @@ def makeShiftedMat(
                 .sum(axis=(1, 3))
             )
 
-            c0 = c0 // oversample_factor
-            c1 = c1 // oversample_factor
-            d0 = d0 // oversample_factor
-            d1 = d1 // oversample_factor
+            c0s = c0 // oversample_factor
+            c1s = c1 // oversample_factor
+            d0s = d0 // oversample_factor
+            d1s = d1 // oversample_factor
 
             mask_val = testModel.T > 1e-4
+            rowind = rowind_slab[c0s:c1s, d0s:d1s]
+            colind = colind_slab[c0s:c1s, d0s:d1s]
+            mv = mask_val[: len(rowind), : len(rowind.T)]
+            matrix_row = local_spaxel_idx * 1400 + spec_element
+            data = testModel.T[: len(rowind), : len(rowind.T)][mv]
 
-            rowind = rowindex[a0:a1, b0:b1][c0:c1, d0:d1]
+            all_data.append(data)
+            all_rows.append(np.full(len(data), matrix_row, dtype=np.int32))
+            all_cols.append(colind[mv] * 2048 + rowind[mv])
 
-            row = rowind[mask_val[: len(rowind), : len(rowind.T)]]
-            colind = columnindex[a0:a1, b0:b1][c0:c1, d0:d1]
-            col = colind[mask_val[: len(rowind), : len(rowind.T)]]
+    return np.concatenate(all_data), np.concatenate(all_rows), np.concatenate(all_cols)
 
-            data = testModel.T[: len(rowind), : len(rowind.T)][mask_val[: len(rowind), : len(rowind.T)]]
-            s_image = sparse.csr_matrix((data, (col, row)), shape=(4096, 2048))
 
-            s_image = s_image.reshape((1, int(2048 * 4096)))
-            list_huge_matrix.append(s_image)
+@pipeline_task()
+def makeShiftedMat_neighbors(spaxel: int, oversample_factor: int = 1, iteration: int = 0):
+    """Build matrix rows for the 14 neighbors of spaxel (no offset/width perturbation).
 
-    huge_matrix = sparse.vstack(list_huge_matrix)
+    This result is identical for every param value in an iteration, so compute it once.
+    """
+    row_start = 15 * (spaxel // 15)
+    row_end = 15 * (spaxel // 15 + 1)
+    neighbor_ids = [sid for sid in range(row_start, row_end) if sid != spaxel]
 
-    return huge_matrix
+    data, rows, cols = _build_spaxel_rows(
+        neighbor_ids, row_start,
+        offset_per_id={}, width_per_id={},
+        oversample_factor=oversample_factor,
+        use_total_coeffs_for=None,
+    )
+    return sparse.csr_matrix(
+        (data, (rows, cols)),
+        shape=(15 * 1400, 2048 * 4096),
+    )
+
+
+@pipeline_task()
+def makeShiftedMat_target(
+    spaxel: int, offset: float, width: float, oversample_factor: int = 1, iteration: int = 0
+):
+    """Build the single matrix row for the target spaxel with a given offset/width perturbation."""
+    row_start = 15 * (spaxel // 15)
+
+    data, rows, cols = _build_spaxel_rows(
+        [spaxel], row_start,
+        offset_per_id={spaxel: offset},
+        width_per_id={spaxel: width},
+        oversample_factor=oversample_factor,
+        use_total_coeffs_for=spaxel,
+    )
+    return sparse.csr_matrix(
+        (data, (rows, cols)),
+        shape=(15 * 1400, 2048 * 4096),
+    )
+
+
+@pipeline_task()
+def combine_sparse_matrices(neighbor_mat, target_mat):
+    """Add neighbor and target sparse matrices (they have non-overlapping rows)."""
+    return neighbor_mat + target_mat
+
+
+@pipeline_task()
+def makeShiftedMat(
+    spaxel: int, offsets: np.ndarray, widths: np.ndarray, oversample_factor: int = 1, iteration: int = 0
+):
+    """Original combined builder — kept for backward compatibility with final fit calls."""
+    row_start = 15 * (spaxel // 15)
+    row_end = 15 * (spaxel // 15 + 1)
+
+    data, rows, cols = _build_spaxel_rows(
+        list(range(row_start, row_end)), row_start,
+        offset_per_id={sid: float(offsets[sid]) for sid in range(row_start, row_end)},
+        width_per_id={sid: float(widths[sid]) for sid in range(row_start, row_end)},
+        oversample_factor=oversample_factor,
+        use_total_coeffs_for=spaxel,
+    )
+    return sparse.csr_matrix(
+        (data, (rows, cols)),
+        shape=(15 * 1400, 2048 * 4096),
+    )
 
 
 @pipeline_task()
@@ -369,117 +426,160 @@ def l1_calculations(spaxels_to_process, flat_results, n_params, iteration, is_of
             print(f"Updated total_widths for spaxel {spax}: {total_widths[str(spax)]}", flush=True)
 
 
+def _load_spaxel_jsons(spaxels: list[int], out: Path) -> None:
+    for spax in spaxels:
+        shifts_path = out / f"loop_shifts_spaxel_{spax}.json"
+        widths_path = out / f"loop_widths_spaxel_{spax}.json"
+        if shifts_path.exists():
+            with shifts_path.open("r") as f:
+                total_coeffs[str(spax)] = json.load(f)[str(spax)]
+        if widths_path.exists():
+            with widths_path.open("r") as f:
+                total_widths[str(spax)] = json.load(f)[str(spax)]
+
+
+def _save_spaxel_jsons(spaxels: list[int], out: Path, iteration: int) -> None:
+    for spax in spaxels:
+        with (out / f"loop_shifts_spaxel_{spax}.json").open("w") as f:
+            json.dump({str(spax): total_coeffs[str(spax)]}, f)
+        with (out / f"loop_widths_spaxel_{spax}.json").open("w") as f:
+            json.dump({str(spax): total_widths[str(spax)]}, f)
+    logger.info(f"Saved per-spaxel JSONs after iteration {iteration}")
+
+
+def _run_one_iteration(
+    spaxels: list[int], iteration: int, is_offset_iter: bool, iter_params: list[float]
+) -> list:
+    flat_results = []
+    for spax in spaxels:
+        spectra = np.concatenate(spec[15 * (spax // 15) : 15 * (spax // 15 + 1)])
+        spax_futures = []
+        for param in iter_params:
+            offsets = np.zeros(225)
+            widths = np.zeros(225)
+            if is_offset_iter:
+                offsets[spax] = param
+            else:
+                widths[spax] = param
+            mat_future = makeShiftedMat.submit(spax, offsets, widths, oversample_factor=4, iteration=iteration)
+            fit_future = fit.submit(
+                mat_future, science_image, spectra, spaxel=spax, iteration=iteration, param=param
+            )
+            spax_futures.append(compute_bin_stats.submit(fit_future, spax))
+        flat_results.extend(f.result() for f in spax_futures)
+    return flat_results
+
+
+
+
 @pipeline_flow()
 def make_parameter_matrix_old(
     spaxels_to_process: list[int] | None = None,
-    iteration_max: int = 14,
+    iteration_max: int = 10,
     output_dir: Path | None = None,
 ):
     shift_offsets = [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2]
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
     global science_image, params
-    with fits.open("/home/anousha/snifs_model/refs/deep_skyflat_coadd.fits") as hdul:
+    with fits.open("/home/anousha/SNIFS-model/refs/deep_skyflat_coadd.fits") as hdul:
         science_image = hdul[0].data  # type:ignore
 
     spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else [8]
     out = output_dir if output_dir is not None else Path.cwd()
     out.mkdir(parents=True, exist_ok=True)
 
+    _load_spaxel_jsons(spaxels_to_process, out)
+
     iteration = 0
     while iteration < iteration_max:
         is_offset_iter = iteration % 2 == 0
         params = shift_offsets if is_offset_iter else width_multipliers
         n_params = len(params)
-
         logger.info(
             f"iteration {iteration}, {'offsets' if is_offset_iter else 'widths'}, "
             f"{len(spaxels_to_process) * n_params} tasks → parallel"
         )
-
-        # Each spaxel's params run in parallel; wait for all of one spaxel before moving to the next.
-        flat_results = []
-        for spax in spaxels_to_process:
-            spectra = np.concatenate(spec[15 * (spax // 15) : 15 * (spax // 15 + 1)])
-            spax_futures = []
-            for param in params:
-                offsets = np.zeros(225)
-                widths = np.zeros(225)
-                if is_offset_iter:
-                    offsets[spax] = param
-                else:
-                    widths[spax] = param
-                mat_future = makeShiftedMat.submit(spax, offsets, widths, oversample_factor=4, iteration=iteration)
-                fit_future = fit.submit(
-                    mat_future, science_image, spectra, spaxel=spax, iteration=iteration, param=param
-                )
-                spax_futures.append(compute_bin_stats.submit(fit_future, spax))
-            flat_results.extend(f.result() for f in spax_futures)
-
+        flat_results = _run_one_iteration_parallel(spaxels_to_process, iteration, is_offset_iter, params)
         l1_calculations(spaxels_to_process, flat_results, n_params, iteration, is_offset_iter)
         logger.info("L1 calculations complete")
         iteration += 1
+        _save_spaxel_jsons(spaxels_to_process, out, iteration)
 
     for spax in spaxels_to_process:
-        spax_shifts_path = out / f"loop_shifts_spaxel_{spax}.json"
-        with spax_shifts_path.open("w") as f:
-            json.dump({str(spax): total_coeffs[str(spax)]}, f)
-        spax_widths_path = out / f"loop_widths_spaxel_{spax}.json"
-        with spax_widths_path.open("w") as f:
-            json.dump({str(spax): total_widths[str(spax)]}, f)
         create_markdown_artifact(
             markdown=(
                 f"**Per-spaxel coefficients (spaxel {spax})**\n\n"
-                f"shifts: `{spax_shifts_path}`\n\nwidths: `{spax_widths_path}`"
+                f"shifts: `{out / f'loop_shifts_spaxel_{spax}.json'}`\n\n"
+                f"widths: `{out / f'loop_widths_spaxel_{spax}.json'}`"
             ),
             key=f"wavelength-cal-spaxel-{spax}",
             description=f"Shift/width polynomial coefficients for spaxel {spax}",
         )
 
     for spaxel in spaxels_to_process:
-        spectra = np.concatenate(spec[15 * (spaxel // 15) : 15 * (spaxel // 15 + 1)])
-        mat_future = makeShiftedMat.submit(spaxel, np.zeros(225), np.zeros(225), oversample_factor=4, iteration=14)
-        fit.submit(mat_future, science_image, spectra, spaxel=spaxel, iteration=14, param=0.0).result()
-
-    iteration = iteration_max
-    for spaxel in spaxels_to_process:
         print(spaxel)
-        models = []
-        model_iterations = [0]
-        model_iterations.extend(list(range(2, iteration + 1, 2)))
-        for it in model_iterations:
-            fname = f"spaxel_{spaxel}_iteration_{it}.fits"
-            with fits.open(fname) as hdul:
-                models.append(hdul[0].data)  # type:ignore
-            print(fname)
-            print(total_widths[str(spaxel)][str(it)])
-        animate_poly_convergence(
-            science_image,
-            models,
-            total_widths,
-            str(spaxel),
-            row_range=(700, 3000),
-            col_range=(970, 1100),
-            x_range=(0, 1400),
-            fps=2,
-            fade_factor=0.6,
-            image_labels=None,
-            colsum_yscale="symlog",
-        )
-        gif_path = os.path.abspath(f"poly_convergence_{spaxel}.gif")
-        create_markdown_artifact(
-            markdown=f"**poly_convergence_{spaxel}.gif**\n\n`{gif_path}`",
-            key=f"animation-spaxel-{spaxel}",
-            description=f"Convergence animation for spaxel {spaxel}",
-        )
+        _final_fit_and_animate(spaxel, iteration_max, out, cleanup_fits=False)
 
+
+def _run_one_iteration_parallel(
+    spaxels: list[int], iteration: int, is_offset_iter: bool, iter_params: list[float]
+) -> list:
+    """Submit all tasks for all spaxels in parallel before waiting.
+
+    Neighbors (14 unchanged rows) are computed once per spaxel per iteration;
+    only the target row is recomputed per param value.
+    """
+    bin_stats_futures = []
+    for spax in spaxels:
+        spectra = np.concatenate(spec[15 * (spax // 15) : 15 * (spax // 15 + 1)])
+        neighbor_future = makeShiftedMat_neighbors.submit(spax, oversample_factor=4, iteration=iteration)
+        for param in iter_params:
+            offset = param if is_offset_iter else 0.0
+            width = param if not is_offset_iter else 0.0
+            target_future = makeShiftedMat_target.submit(spax, offset, width, oversample_factor=4, iteration=iteration)
+            mat_future = combine_sparse_matrices.submit(neighbor_future, target_future)
+            fit_future = fit.submit(
+                mat_future, science_image, spectra, spaxel=spax, iteration=iteration, param=param
+            )
+            bin_stats_futures.append(compute_bin_stats.submit(fit_future, spax))
+    return [f.result() for f in bin_stats_futures]
+
+
+def _final_fit_and_animate(spaxel: int, iteration_max: int, output_dir: Path, cleanup_fits: bool) -> None:
+    spectra = np.concatenate(spec[15 * (spaxel // 15) : 15 * (spaxel // 15 + 1)])
+    mat_future = makeShiftedMat.submit(
+        spaxel, np.zeros(225), np.zeros(225), oversample_factor=4, iteration=iteration_max
+    )
+    fit.submit(mat_future, science_image, spectra, spaxel=spaxel, iteration=iteration_max, param=0.0).result()
+
+    models = []
+    for it in [0] + list(range(1, iteration_max, 2)):
+        with fits.open(f"spaxel_{spaxel}_iteration_{it}.fits") as hdul:
+            models.append(hdul[0].data)  # type:ignore
+    animate_poly_convergence(
+        science_image, models, total_widths, str(spaxel),
+        row_range=(700, 3000), col_range=(970, 1100), x_range=(0, 1400),
+        fps=2, fade_factor=0.6, image_labels=None, colsum_yscale="symlog",
+    )
+    gif_path = output_dir / f"poly_convergence_{spaxel}.gif"
+    create_markdown_artifact(
+        markdown=f"**poly_convergence_{spaxel}.gif**\n\n`{gif_path}`",
+        key=f"animation-spaxel-{spaxel}",
+        description=f"Convergence animation for spaxel {spaxel}",
+    )
+    if cleanup_fits:
+        for it in range(iteration_max + 1):
+            fits_path = Path(f"spaxel_{spaxel}_iteration_{it}.fits")
+            if fits_path.exists():
+                fits_path.unlink()
 
 # @pipeline_flow()
 def run_make_parameter_matrix(
     science_exposure_path: Path,
     output_dir: Path,
     spaxels_to_process: list[int] | None = None,
-    iteration_max: int = 14,
+    iteration_max: int = 10,
     cleanup_fits: bool = False,
 ):
     shift_offsets = [-0.2, -0.1, 0, 0.1, 0.2]
@@ -487,100 +587,35 @@ def run_make_parameter_matrix(
 
     global science_image, params
     image = Image.from_asdf(science_exposure_path)
-    science_image = image.data
-    science_image = science_image.T  # transpose to match the orientation used in the original code
+    science_image = image.data.T  # transpose to match the orientation used in the original code
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    shifts_path = output_dir / "loop_shifts_editable.json"
-    widths_path = output_dir / "loop_widths_editable.json"
-
-    if spaxels_to_process is None:
-        spaxels_to_process = list(range(225))
+    spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else list(range(225))
+    _load_spaxel_jsons(spaxels_to_process, output_dir)
 
     iteration = 0
     while iteration < iteration_max:
         is_offset_iter = iteration % 2 == 0
         params = shift_offsets if is_offset_iter else width_multipliers
         n_params = len(params)
-
         logger.info(
             f"iteration {iteration}, {'offsets' if is_offset_iter else 'widths'}, "
             f"{len(spaxels_to_process) * n_params} tasks → parallel"
         )
-
-        bin_stats_futures = []
-        for spax in spaxels_to_process:
-            spectra = np.concatenate(spec[15 * (spax // 15) : 15 * (spax // 15 + 1)])
-            for param in params:
-                offsets = np.zeros(225)
-                widths = np.zeros(225)
-                if is_offset_iter:
-                    offsets[spax] = param
-                else:
-                    widths[spax] = param
-                mat_future = makeShiftedMat.submit(spax, offsets, widths, oversample_factor=4, iteration=iteration)
-                fit_future = fit.submit(
-                    mat_future, science_image, spectra, spaxel=spax, iteration=iteration, param=param
-                )
-                bin_stats_futures.append(compute_bin_stats.submit(fit_future, spax))
-        flat_results = [f.result() for f in bin_stats_futures]
-
+        flat_results = _run_one_iteration_parallel(spaxels_to_process, iteration, is_offset_iter, params)
         l1_calculations(spaxels_to_process, flat_results, n_params, iteration, is_offset_iter)
-
         iteration += 1
+        _save_spaxel_jsons(spaxels_to_process, output_dir, iteration)
 
-    for spax in spaxels_to_process:
-        spax_shifts_path = output_dir / f"loop_shifts_spaxel_{spax}.json"
-        with spax_shifts_path.open("w") as f:
-            json.dump({str(spax): total_coeffs[str(spax)]}, f)
-        spax_widths_path = output_dir / f"loop_widths_spaxel_{spax}.json"
-        with spax_widths_path.open("w") as f:
-            json.dump({str(spax): total_widths[str(spax)]}, f)
-    logger.info(f"Saved per-spaxel shift/width JSONs to {output_dir}")
-
+    shifts_path = output_dir / "loop_shifts_editable.json"
+    widths_path = output_dir / "loop_widths_editable.json"
     image.header.set("shift_coeff_path", str(shifts_path))
     image.header.set("width_coeff_path", str(widths_path))
     image.to_asdf(science_exposure_path)
     logger.info(f"Updated science exposure header with coefficient paths at {science_exposure_path}")
 
     for spaxel in spaxels_to_process:
-        spectra = np.concatenate(spec[15 * (spaxel // 15) : 15 * (spaxel // 15 + 1)])
-        mat_future = makeShiftedMat.submit(
-            spaxel, np.zeros(225), np.zeros(225), oversample_factor=4, iteration=iteration_max
-        )
-        fit.submit(mat_future, science_image, spectra, spaxel=spaxel, iteration=iteration_max, param=0.0).result()
-
-        models = []
-        model_iterations = [0]
-        model_iterations.extend(list(range(1, iteration_max, 2)))
-        for it in model_iterations:
-            fname = f"spaxel_{spaxel}_iteration_{it}.fits"
-            with fits.open(fname) as hdul:
-                models.append(hdul[0].data)  # type:ignore
-        animate_poly_convergence(
-            science_image,
-            models,
-            total_widths,
-            str(spaxel),
-            row_range=(700, 3000),
-            col_range=(970, 1100),
-            x_range=(0, 1400),
-            fps=2,
-            fade_factor=0.6,
-            image_labels=None,
-            colsum_yscale="symlog",
-        )
-        gif_path = output_dir / f"poly_convergence_{spaxel}.gif"
-        create_markdown_artifact(
-            markdown=f"**poly_convergence_{spaxel}.gif**\n\n`{gif_path}`",
-            key=f"animation-spaxel-{spaxel}",
-            description=f"Convergence animation for spaxel {spaxel}",
-        )
-        if cleanup_fits:
-            for it in range(15):
-                fits_path = Path(f"spaxel_{spaxel}_iteration_{it}.fits")
-                if fits_path.exists():
-                    fits_path.unlink()
+        _final_fit_and_animate(spaxel, iteration_max, output_dir, cleanup_fits)
 
 
 if __name__ == "__main__":
@@ -604,3 +639,13 @@ if __name__ == "__main__":
 
     output_dir = Path(args.output_dir) if args.output_dir else Path.cwd()
     make_parameter_matrix_old(spaxels, iteration_max=args.iteration_max, output_dir=output_dir)
+
+    combine_spaxel_jsons(output_dir)
+    logger.info(f"Combined JSONs written to {output_dir}")
+
+    for spaxel in spaxels:
+        for it in range(args.iteration_max + 1):
+            fits_path = Path(f"spaxel_{spaxel}_iteration_{it}.fits")
+            if fits_path.exists():
+                fits_path.unlink()
+    logger.info("Cleaned up fits files")

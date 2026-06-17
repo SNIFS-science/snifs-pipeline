@@ -18,6 +18,7 @@ export PREFECT_API_URL
 
 echo "Worker for spaxels ${SPAXEL_RANGE}, connecting to ${PREFECT_API_URL}"
 
-uv run python /home/anousha/snifs-pipeline/src/pipeline/tasks/processing/make_parameter_matrix.py \
+cd /home/anousha/snifs-pipeline
+uv run --no-sync python src/pipeline/tasks/processing/make_parameter_matrix.py \
     --spaxels "$SPAXEL_RANGE" \
     --output-dir "$OUTPUT_DIR"
