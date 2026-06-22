@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import resource
 import time
 from io import BytesIO
 from pathlib import Path
@@ -58,6 +59,14 @@ offsets_cross_disp[~np.isfinite(offsets_cross_disp)] = 0.0  # fix for nans in th
 
 n_cross = (np.log(0.0032) - np.log(6.90e-4)) / (np.log(4.917) - np.log(26.939))
 n_spec = (np.log(0.0040) - np.log(8.447e-4)) / (np.log(4.52) - np.log(21.026))
+
+
+def _peak_memory_mb() -> float:
+    """Return peak RSS in MB (works on Linux and macOS)."""
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # Linux reports bytes; macOS reports bytes too (despite the docs saying kilobytes)
+    return rss / (1024 * 1024)
+
 
 start_time = time.time()
 
@@ -222,7 +231,7 @@ def _build_spaxel_rows(
     return np.concatenate(all_data), np.concatenate(all_rows), np.concatenate(all_cols)
 
 
-@pipeline_task()
+@pipeline_task(task_run_name="neighbors-spaxel{spaxel}")
 def makeShiftedMat_neighbors(spaxel: int, oversample_factor: int = 1, iteration: int = 0):
     """Build matrix rows for the 14 neighbors of spaxel (no offset/width perturbation).
 
@@ -244,7 +253,7 @@ def makeShiftedMat_neighbors(spaxel: int, oversample_factor: int = 1, iteration:
     )
 
 
-@pipeline_task()
+@pipeline_task(task_run_name="target-spaxel{spaxel}-iter{iteration}-offset{offset:+.2f}-width{width:+.2f}")
 def makeShiftedMat_target(
     spaxel: int, offset: float, width: float, oversample_factor: int = 1, iteration: int = 0
 ):
@@ -291,7 +300,7 @@ def makeShiftedMat(
     )
 
 
-@pipeline_task()
+@pipeline_task(task_run_name="fit-spaxel{spaxel}-iter{iteration}-param{param:+.2f}")
 def fit(matrix, image, spectra, worker="main", spaxel=0, iteration=0, param=0.0):
     logger.info(f"[{worker}]   fitting model for spaxel={spaxel}, iteration={iteration}, param={param}...")
     matrix = matrix.transpose()
@@ -354,7 +363,7 @@ def fit_best_shift(shifts, values, degree=4):
     return x_fine[np.argmin(poly(x_fine))]
 
 
-@pipeline_task()
+@pipeline_task(task_run_name="bin-stats-spaxel{spax}")
 def compute_bin_stats(model: np.ndarray, spax: int) -> np.ndarray:
     """Compute per-bin L1 statistics for one (spax, param) result."""
     bin_stats = np.full(n_bins, np.nan)
@@ -383,7 +392,7 @@ def psf_calculation(sum_along_cross_disp: np.ndarray) -> np.ndarray:
     return sum_along_cross_disp
 
 
-@pipeline_task()
+@pipeline_task(task_run_name="l1-iter{iteration}-offsets{is_offset_iter}")
 def l1_calculations(spaxels_to_process, flat_results, n_params, iteration, is_offset_iter):
     for spax_idx, spax in enumerate(spaxels_to_process):
         bin_stats_per_param = np.array(
@@ -470,6 +479,55 @@ def _run_one_iteration(
     return flat_results
 
 
+# TODO: maybe make a pipeline_subflow decorator? but on the cluster this would just be what is called in each job
+def _run_one_spaxel_all_iterations(
+    spax: int,
+    iteration_max: int,
+    shift_offsets: list[float],
+    width_multipliers: list[float],
+    out: Path,
+) -> None:
+    """Run all iterations for a single spaxel sequentially.
+
+    Neighbors are recomputed once per iteration (their rows never change between params).
+    Only one param's worth of matrices is live in memory at a time.
+    Peak RSS is logged after each fit so we can right-size the Slurm memory request.
+    """
+    spectra = np.concatenate(spec[15 * (spax // 15) : 15 * (spax // 15 + 1)])
+
+    # Neighbor rows never change across any iteration — compute once for this spaxel.
+    neighbor_mat = makeShiftedMat_neighbors.submit(spax, oversample_factor=4).result()
+    logger.info(f"[spaxel {spax}] neighbors done | peak RSS {_peak_memory_mb():.0f} MB")
+
+    for iteration in range(iteration_max):
+        global params
+        is_offset_iter = iteration % 2 == 0
+        iter_params = shift_offsets if is_offset_iter else width_multipliers
+        params = iter_params
+
+        bin_stats_list = []
+        for param in iter_params:
+            offset = param if is_offset_iter else 0.0
+            width = param if not is_offset_iter else 0.0
+
+            target_mat = makeShiftedMat_target.submit(
+                spax, offset, width, oversample_factor=4, iteration=iteration
+            ).result()
+            combined = neighbor_mat + target_mat
+            del target_mat
+
+            model = fit.submit(combined, science_image, spectra, spaxel=spax, iteration=iteration, param=param).result()
+            logger.info(
+                f"[spaxel {spax}] iter {iteration} param {param:+.2f} fit done | peak RSS {_peak_memory_mb():.0f} MB"
+            )
+            del combined
+
+            bin_stats_list.append(compute_bin_stats.submit(model, spax).result())
+            del model
+
+        l1_calculations.submit([spax], bin_stats_list, len(iter_params), iteration, is_offset_iter).result()
+        _save_spaxel_jsons([spax], out, iteration + 1)
+        logger.info(f"[spaxel {spax}] iter {iteration} complete | peak RSS {_peak_memory_mb():.0f} MB")
 
 
 @pipeline_flow()
@@ -482,7 +540,7 @@ def make_parameter_matrix_old(
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
     global science_image, params
-    with fits.open("/home/anousha/SNIFS-model/refs/deep_skyflat_coadd.fits") as hdul:
+    with fits.open("/Users/anousha/Desktop/SNIFS/model/refs/deep_skyflat_coadd.fits") as hdul:
         science_image = hdul[0].data  # type:ignore
 
     spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else [8]
@@ -491,22 +549,10 @@ def make_parameter_matrix_old(
 
     _load_spaxel_jsons(spaxels_to_process, out)
 
-    iteration = 0
-    while iteration < iteration_max:
-        is_offset_iter = iteration % 2 == 0
-        params = shift_offsets if is_offset_iter else width_multipliers
-        n_params = len(params)
-        logger.info(
-            f"iteration {iteration}, {'offsets' if is_offset_iter else 'widths'}, "
-            f"{len(spaxels_to_process) * n_params} tasks → parallel"
-        )
-        flat_results = _run_one_iteration_parallel(spaxels_to_process, iteration, is_offset_iter, params)
-        l1_calculations(spaxels_to_process, flat_results, n_params, iteration, is_offset_iter)
-        logger.info("L1 calculations complete")
-        iteration += 1
-        _save_spaxel_jsons(spaxels_to_process, out, iteration)
-
     for spax in spaxels_to_process:
+        logger.info(f"Starting spaxel {spax} | peak RSS {_peak_memory_mb():.0f} MB")
+        _run_one_spaxel_all_iterations(spax, iteration_max, shift_offsets, width_multipliers, out)
+        logger.info(f"Finished spaxel {spax} | peak RSS {_peak_memory_mb():.0f} MB")
         create_markdown_artifact(
             markdown=(
                 f"**Per-spaxel coefficients (spaxel {spax})**\n\n"
@@ -518,7 +564,6 @@ def make_parameter_matrix_old(
         )
 
     for spaxel in spaxels_to_process:
-        print(spaxel)
         _final_fit_and_animate(spaxel, iteration_max, out, cleanup_fits=False)
 
 
@@ -630,7 +675,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.spaxels is None:
-        spaxels = list(range(120, 135))
+        spaxels = list(range(135, 150))
     elif "-" in args.spaxels and "," not in args.spaxels:
         start, end = args.spaxels.split("-")
         spaxels = list(range(int(start), int(end) + 1))

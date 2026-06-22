@@ -78,5 +78,6 @@ data/
 !output/level=processed/type=CCD_ON_TIMES/times.parquet
 
 *.gif
+*.webp
 loop*.json
 spaxel_*_iteration_*.fits

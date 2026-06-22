@@ -1,12 +1,14 @@
 #!/bin/bash -l
-# Worker job: runs make_parameter_matrix_old for one group of spaxels.
+# Worker job: runs make_parameter_matrix_old for one group of spaxels sequentially.
+# Spaxels are processed one at a time; only one spaxel's matrices are live at once.
 # Submitted by make_matrix_script.slr — do not submit directly.
 #SBATCH --job-name=matrix-worker
-#SBATCH --time=90:00:00
+#SBATCH --time=12:00:00
 #SBATCH --account=cusp
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=8G
 #SBATCH -o matrix_worker_%j.out
 
 source /home/anousha/miniconda3/etc/profile.d/conda.sh

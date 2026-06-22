@@ -1,8 +1,10 @@
 #!/bin/bash -l
-# Master job: starts Prefect server, submits one worker per spaxel group,
+# Master job: starts Prefect server, submits one worker per spaxel group (15 spaxels each),
 # waits for all workers to finish, combines JSONs, then shuts the server down.
+# Workers process spaxels sequentially — wall time = 15 spaxels × time-per-spaxel.
+# Adjust --time on workers (make_matrix_worker.slr) based on observed per-spaxel runtime.
 #SBATCH --job-name=prefect-master
-#SBATCH --time=96:00:00
+#SBATCH --time=14:00:00
 #SBATCH --account=cusp
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
