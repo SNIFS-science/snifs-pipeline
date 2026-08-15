@@ -19,6 +19,7 @@ import uuid
 from collections import deque
 from contextlib import contextmanager, nullcontext
 from multiprocessing.shared_memory import SharedMemory
+import scipy.sparse as sp
 
 import dask
 dask.config.set({
@@ -27,8 +28,8 @@ dask.config.set({
     "distributed.scheduler.worker-saturation": 0.8,
     
     # Memory management limits relative to worker memory_limit (e.g., CPU_MEM_LIMIT)
-    "distributed.worker.memory.target": 0.60,   # Start spilling/clearing unneeded data at 60%
-    "distributed.worker.memory.spill": 0.70,    # Aggressive memory management at 70%
+    "distributed.worker.memory.target": 0.65,   # Start spilling/clearing unneeded data at 60%
+    "distributed.worker.memory.spill": 0.75,    # Aggressive memory management at 70%
     "distributed.worker.memory.pause": 0.80,    # Stop starting NEW tasks when worker reaches 80%
     "distributed.worker.memory.terminate": 0.95 # Terminate worker if it hits 95% to prevent OS crash
 })
@@ -51,7 +52,7 @@ except ImportError:  # Prefect 2
 # ==============================================================================
 # ENVIRONMENT & CONFIGURATION
 # ==============================================================================
-CUDA_DIR = os.environ.get("CUDA_PATH", r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3")
+CUDA_DIR = os.environ.get("CUDA_HOME", r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3")
 _cuda_bin = os.path.join(CUDA_DIR, "bin")
 if os.path.isdir(_cuda_bin):
     os.environ["CUDA_HOME"] = CUDA_DIR
@@ -76,13 +77,14 @@ MAX_ITERS = 10
 N_OFFSET = 5
 N_WIDTH = 6
 
-NUM_CPU_WORKERS = _envint("SNIFS_CPU_WORKERS", max(1, 6))
-NUM_GPU_WORKERS = _envint("SNIFS_GPU_WORKERS", 1)
-CPU_MEM_LIMIT = os.environ.get("SNIFS_CPU_MEM", "16GiB")
-GPU_MEM_LIMIT = os.environ.get("SNIFS_GPU_MEM", "12GiB")
+NUM_GPUS = 4
+NUM_CPU_WORKERS = _envint("MODEL_CPU_WORKERS", 32)
+NUM_WORKERS_PER_GPU = 4
+CPU_MEM_LIMIT = os.environ.get("MODEL_CPU_MEM", "3.5GiB")
+GPU_MEM_LIMIT = os.environ.get("MODEL_GPU_MEM", "10GiB")
 
-MAX_SPAXELS_IN_FLIGHT = 1#_envint("SNIFS_INFLIGHT", 0) or max(2, NUM_CPU_WORKERS // N_WIDTH + 2)
-BUILD_PERTS_ONE_AT_A_TIME = os.environ.get("SNIFS_BUILD_ONE", "1") == "1"
+MAX_SPAXELS_IN_FLIGHT = _envint("MODEL_INFLIGHT", 12) 
+BUILD_PERTS_ONE_AT_A_TIME = False
 
 DETECTOR_SHAPE = (4096, 2048)
 N_DET_PIX = DETECTOR_SHAPE[0] * DETECTOR_SHAPE[1]
@@ -95,8 +97,9 @@ POLY_DEGREE = 4
 POLY_NCOEF = POLY_DEGREE + 1
 IDX_DTYPE = np.int32
 
-folder_path = os.environ.get("SNIFS_BIN_DIR", "./bin_saves")
-out_dir = os.environ.get("SNIFS_OUT_DIR", "./spaxel_fits/shrinking_span")
+#TODO tasks 1, 2, and 3 the bin_saves, outdir and fits file path
+folder_path = "./bin_saves"
+out_dir = "./spaxel_fits/"
 fits_path = os.environ.get(
     "SNIFS_TEST_FITS",
     "C:/Users/gibis/URAP/snifs-pipeline/output/level=preprocessed/deep_skyflat_coadd.fits",
@@ -387,9 +390,6 @@ def build_matrices_task(spax_id, is_offset, shifts, off_poly, wid_poly):
     n_pert = int(shifts.size)
     token = f"{spax_id}-{uuid.uuid4().hex[:12]}"
 
-    #TODO change this to just be off_poly and wid_poly because each spectrums should change as it is fit
-    # off_nb = np.zeros_like(off_poly)
-    # wid_nb = np.zeros_like(wid_poly)
 
     neighbor = build_neighbor_matrix(target_spaxel=spax_id,
                                     offsets=_to_ascending(off_poly),
@@ -415,11 +415,12 @@ def build_matrices_task(spax_id, is_offset, shifts, off_poly, wid_poly):
             del res, trip
     else:
         res = build_target_matrix(
-            target_spaxel=spax_id,
-            widths=wid_poly,
-            offsets=off_poly,
-            o_pert=shifts if is_offset else None,
-            w_pert=None if is_offset else shifts,
+                target_spaxel=spax_id,
+                widths=_to_ascending(wid_poly),
+                offsets=_to_ascending(off_poly),
+                o_pert=shifts if is_offset else None,
+                w_pert=None if is_offset else shifts,
+                oversample_factor=4
         )
         while res:
             pert_metas.append(_put_triplet(res.pop(0)))
@@ -485,37 +486,14 @@ def solve_perturbation_task(payload, p_idx):
         )
 
     try:
-        import pypardiso
-        # 1. Transpose A
         At = A.T.tocsr()
+        AtA = (At.dot(A)).tocsc() + 1e-10 * sparse.eye(MATRIX_SHAPE[1], format="csc")
+        Atb = At.dot(b)
+        x = spsolve(AtA, Atb)
+        del AtA, Atb, At
 
-        # 2. Compute Atb (Ensure float64 contiguous vector)
-        Atb = np.ascontiguousarray(At.dot(b), dtype=np.float64)
-        del b
+        # del AtA, Atb, At, AtA_upper
 
-        # 3. Compute AtA and explicitly enforce float64
-        AtA = At.dot(A).astype(np.float64, copy=False)
-        del At  # Free memory
-        gc.collect()
-
-        # 4. Regularization on full matrix
-        diag = AtA.diagonal()
-        diag_max = diag.max()
-        alpha = 1e-6 * (diag_max if (diag_max > 0 and np.isfinite(diag_max)) else 1.0)
-        AtA.setdiag(diag + alpha)
-
-        # 5. Type Conversions for PyPardiso
-        # Ensure values are float64 and matrix indices are int32 C-pointers
-        if AtA.dtype != np.float64:
-            AtA = AtA.astype(np.float64)
-
-        AtA.indices = AtA.indices.astype(np.int32)
-        AtA.indptr = AtA.indptr.astype(np.int32)
-        AtA.sort_indices()
-
-        # 6. Solve
-        x = pypardiso.spsolve(AtA, Atb)
-        
     except (MemoryError, OSError) as e:
         # If OOM hits during the solve or matrix mult, catch it and fail gracefully
         get_run_logger().error(f"OOM caught on Spaxel {spax_id}: {str(e)} performing perturbation: {p_idx}")
@@ -720,6 +698,8 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
             hist_off = spaxel_states[spax].get("off_poly_history", [])
             hist_wid = spaxel_states[spax].get("wid_poly_history", [])
             hist_loss = spaxel_states[spax].get("loss_history", [])
+            
+            # This blocks until the CPU aggregation (and implicitly the GPU tasks) are done
             new_st = rec["agg"].result()
 
             # Append newly processed polynomials to history lists
@@ -728,7 +708,11 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
             new_st["loss_history"] = hist_loss + [new_st["last_loss"]]
 
             spaxel_states[spax] = new_st
-            releases.append(_submit_pinned(release_matrices_task, rec["origin"], "GPU", rec["payload"]))
+            
+            # NOW we resolve the GPU payload future to get the origin address for cleanup
+            resolved_payload = rec["payload_fut"].result()
+            
+            releases.append(_submit_pinned(release_matrices_task, resolved_payload["origin"], "GPU", resolved_payload))
 
         for group_id in range(NUM_GROUPS):
             if group_id != 9:
@@ -741,7 +725,9 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
                 shifts = st["offset_shifts"] if is_offset else st["width_shifts"]
                 n_pert = int(np.size(shifts))
 
-                payload = _submit(
+                # 1. REMOVE .result() from the end of this call!
+                # We want to return a Future, not block waiting for the answer.
+                payload_fut = _submit(
                     build_matrices_task,
                     gpu_addrs,
                     "GPU",
@@ -750,14 +736,17 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
                     shifts,
                     group_off[group_id],
                     group_wid[group_id],
-                ).result()
+                )
 
-                sol_futs = [_submit(solve_perturbation_task, cpu_addrs, "CPU", payload, p) for p in range(n_pert)]
+                # 2. Pass the future (payload_fut) directly into the CPU task
+                sol_futs = [_submit(solve_perturbation_task, cpu_addrs, "CPU", payload_fut, p) for p in range(n_pert)]
+                
                 agg = _submit(
                     aggregate_spaxel_task, cpu_addrs, "CPU", spax_id, st, sol_futs, is_offset, shifts, curr_iter
                 )
 
-                inflight.append({"spax": spax_id, "payload": payload, "origin": payload["origin"], "agg": agg})
+                # 3. Store the payload future in your tracker instead of the resolved payload
+                inflight.append({"spax": spax_id, "payload_fut": payload_fut, "agg": agg})
 
         while inflight:
             retire_oldest()
@@ -863,39 +852,45 @@ def main():
     ) as cluster:
         sched = cluster.scheduler_address
 
-        gpu_cmd = [
-            sys.executable,
-            "-m",
-            "dask",
-            "worker",
-            sched,
-            "--nworkers",
-            str(NUM_GPU_WORKERS),
-            "--nthreads",
-            "1",
-            "--resources",
-            "GPU=1",
-            "--memory-limit",
-            GPU_MEM_LIMIT,
-            "--preload",
-            module_name,
-            "--name",
-            "gpu-worker",
-        ]
+        # 1. Setup the environment for the workers
         merged = os.environ.copy()
         merged.update(worker_env)
-        gpu_proc = subprocess.Popen(gpu_cmd, env=merged)
+        # Force all simulated workers to use your single laptop GPU (GPU 0)
+        merged["CUDA_VISIBLE_DEVICES"] = "0" 
+        
+        # 2. Launch 3 separate Dask workers, pinning them all to GPU 0
+        num_gpu_workers = NUM_GPUS * NUM_WORKERS_PER_GPU
+        gpu_procs = []
+        for i in range(num_gpu_workers):
+            gpu_id = str(i % NUM_GPUS)  # Cycles through 0, 1, 2, 3
+            worker_env = merged.copy()
+            worker_env["CUDA_VISIBLE_DEVICES"] = gpu_id
 
+            gpu_cmd = [
+                sys.executable, "-m", "dask", "worker", sched,
+                "--nworkers", "1",
+                "--nthreads", "1",
+                "--resources", "GPU=1",
+                "--memory-limit", GPU_MEM_LIMIT,
+                "--preload", module_name,
+                "--name", f"gpu-worker-gpu{gpu_id}-{i}",
+            ]
+            proc = subprocess.Popen(gpu_cmd, env=worker_env)
+            gpu_procs.append(proc)
+
+        # 3. Execute the flow and clean up
         try:
             fit_forward_model.with_options(task_runner=DaskTaskRunner(address=sched))(
-                n_cpu_workers=NUM_CPU_WORKERS, n_gpu_workers=NUM_GPU_WORKERS, sched_address=sched
+                n_cpu_workers=NUM_CPU_WORKERS, n_gpu_workers=num_gpu_workers, sched_address=sched
             )
         finally:
-            gpu_proc.terminate()
-            try:
-                gpu_proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                gpu_proc.kill()
+            # Safely terminate all GPU worker processes
+            for proc in gpu_procs:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
 
 
 if __name__ == "__main__":
