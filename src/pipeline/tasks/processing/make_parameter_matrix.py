@@ -1,11 +1,13 @@
 import base64
 import json
 import os
+import pickle
 import resource
 import time
 from io import BytesIO
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 from astropy.io import fits
 from numpy.polynomial import Polynomial
@@ -47,12 +49,12 @@ yoff = 0
 total_coeffs = {str(spax): {"0": [0.0, 0.0, 0.0, 0.0, 0.0]} for spax in range(225)}
 total_widths = {str(spax): {"0": [0.0, 0.0, 0.0, 0.0, 1.0]} for spax in range(225)}
 
-if os.path.exists("loop_shifts_editable.json") and os.path.exists("loop_widths_editable.json"):
-    with open("loop_shifts_editable.json", "r") as f:
-        total_coeffs = json.load(f)
-    with open("loop_widths_editable.json", "r") as f:
-        total_widths = json.load(f)
-    logger.info("Adding to existing loop_shifts_editable.json / loop_widths_editable.json")
+if os.path.exists("test_loop_shifts_editable.json") and os.path.exists("tester_loop_widths_editable.json"):
+    with open("test_loop_shifts_editable.json", "r") as f:
+        total_coeffs.update(json.load(f))
+    with open("test_loop_widths_editable.json", "r") as f:
+        total_widths.update(json.load(f))
+    logger.info("Adding to existing test_loop_shifts_editable.json / tester_loop_widths_editable.json")
 
 offsets_cross_disp = np.zeros(225)
 offsets_cross_disp[~np.isfinite(offsets_cross_disp)] = 0.0  # fix for nans in the array
@@ -72,7 +74,10 @@ start_time = time.time()
 
 rowindex, columnindex = np.meshgrid(np.arange(0, 2048, 1), np.arange(0, 4096, 1))
 
-spec: np.ndarray = np.ones((225, 1400))
+spec: np.ndarray = np.ones((225, 1400)) # TODO: revert to np.ones((225, 1400))
+#spec: np.ndarray = pickle.load(open('/Users/anousha/Desktop/SNIFS/model/science_spectra.pkl','rb')) #science
+
+
 heights: np.ndarray = np.linspace(0, 4095, 256)
 n_bins: int = len(heights) - 1
 x_sparse: np.ndarray = np.linspace(0, 4095, 256) + 8
@@ -89,15 +94,15 @@ def combine_spaxel_jsons(output_dir: Path) -> None:
     """
     combined_shifts: dict = {}
     combined_widths: dict = {}
-    for path in sorted(output_dir.glob("loop_shifts_spaxel_*.json")):
+    for path in sorted(output_dir.glob("tester_loop_shifts_spaxel_*.json")):
         with path.open("r") as f:
             combined_shifts.update(json.load(f))
-    for path in sorted(output_dir.glob("loop_widths_spaxel_*.json")):
+    for path in sorted(output_dir.glob("tester_loop_widths_spaxel_*.json")):
         with path.open("r") as f:
             combined_widths.update(json.load(f))
-    with (output_dir / "loop_shifts_editable.json").open("w") as f:
+    with (output_dir / "tester_loop_shifts_editable.json").open("w") as f:
         json.dump(combined_shifts, f, indent=2)
-    with (output_dir / "loop_widths_editable.json").open("w") as f:
+    with (output_dir / "tester_loop_widths_editable.json").open("w") as f:
         json.dump(combined_widths, f, indent=2)
 
 
@@ -112,11 +117,15 @@ def _build_spaxel_rows(
     width_per_id: dict[int, float],
     oversample_factor: int,
     use_total_coeffs_for: int | None,
+    gauss_width_scale: float = 0.6,
+    lorentz_width_scale: float = 1.1,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build COO triplets for a subset of spaxel rows.
 
     offset_per_id / width_per_id: scalar offset/width adjustment per spaxel_ID.
     use_total_coeffs_for: if not None, apply total_coeffs/total_widths lookup for that spaxel_ID.
+    gauss_width_scale / lorentz_width_scale: multipliers on widthVals for the spectral-direction
+        Gaussian and Lorentzian widths (defaults 0.6/1.3 preserve original behavior).
     Returns (data, rows, cols) ready for sparse.csr_matrix construction.
     """
     all_data: list = []
@@ -195,7 +204,12 @@ def _build_spaxel_rows(
             )
 
             spectral = 0.8 * pseudo_voigt(
-                np.abs(xiii), 0, 0.6 * widthVals[spec_element], 1.3 * widthVals[spec_element], 5.4, 0.6
+                np.abs(xiii),
+                0,
+                gauss_width_scale * widthVals[spec_element],
+                lorentz_width_scale * widthVals[spec_element],
+                5.4,
+                0.6,
             ) + pseudo_voigt(np.abs(xiii), 0, 1.2, 0.2, -n_spec, 0.1, beta=0)
             crossdis = 0.99 * pseudo_voigt(
                 np.abs(yiii), 0, 0.6 * widthVals[spec_element], 1.4 * widthVals[spec_element], 5.2, 0.6
@@ -324,7 +338,7 @@ def fit(matrix, image, spectra, worker="main", spaxel=0, iteration=0, param=0.0)
 
     if param == 0.0:
         hdu = fits.PrimaryHDU(fitModel)
-        fits_filename = f"spaxel_{spaxel}_iteration_{iteration}.fits"
+        fits_filename = f"tester_spaxel_{spaxel}_iteration_{iteration}.fits"
         hdulist = fits.HDUList([hdu])
         hdulist.writeto(fits_filename, overwrite=True)
         hdulist.close()
@@ -437,8 +451,8 @@ def l1_calculations(spaxels_to_process, flat_results, n_params, iteration, is_of
 
 def _load_spaxel_jsons(spaxels: list[int], out: Path) -> None:
     for spax in spaxels:
-        shifts_path = out / f"loop_shifts_spaxel_{spax}.json"
-        widths_path = out / f"loop_widths_spaxel_{spax}.json"
+        shifts_path = out / f"tester_loop_shifts_spaxel_{spax}.json"
+        widths_path = out / f"tester_loop_widths_spaxel_{spax}.json"
         if shifts_path.exists():
             with shifts_path.open("r") as f:
                 total_coeffs[str(spax)] = json.load(f)[str(spax)]
@@ -449,9 +463,9 @@ def _load_spaxel_jsons(spaxels: list[int], out: Path) -> None:
 
 def _save_spaxel_jsons(spaxels: list[int], out: Path, iteration: int) -> None:
     for spax in spaxels:
-        with (out / f"loop_shifts_spaxel_{spax}.json").open("w") as f:
+        with (out / f"tester_loop_shifts_spaxel_{spax}.json").open("w") as f:
             json.dump({str(spax): total_coeffs[str(spax)]}, f)
-        with (out / f"loop_widths_spaxel_{spax}.json").open("w") as f:
+        with (out / f"tester_loop_widths_spaxel_{spax}.json").open("w") as f:
             json.dump({str(spax): total_widths[str(spax)]}, f)
     logger.info(f"Saved per-spaxel JSONs after iteration {iteration}")
 
@@ -535,19 +549,24 @@ def make_parameter_matrix_old(
     spaxels_to_process: list[int] | None = None,
     iteration_max: int = 10,
     output_dir: Path | None = None,
+    fresh: bool = False,
 ):
     shift_offsets = [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2]
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
     global science_image, params
     with fits.open("/Users/anousha/Desktop/SNIFS/model/refs/deep_skyflat_coadd.fits") as hdul:
+    #with fits.open("/Users/anousha/Desktop/SNIFS/model/refs/EG131_2025/P25_196_027_003_17_B.fits") as hdul: #TODO: change to science exposure path
         science_image = hdul[0].data  # type:ignore
 
     spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else [8]
     out = output_dir if output_dir is not None else Path.cwd()
     out.mkdir(parents=True, exist_ok=True)
 
-    _load_spaxel_jsons(spaxels_to_process, out)
+    if fresh:
+        logger.info(f"--fresh set: ignoring any existing per-spaxel JSONs for {spaxels_to_process}")
+    else:
+        _load_spaxel_jsons(spaxels_to_process, out)
 
     for spax in spaxels_to_process:
         logger.info(f"Starting spaxel {spax} | peak RSS {_peak_memory_mb():.0f} MB")
@@ -556,8 +575,8 @@ def make_parameter_matrix_old(
         create_markdown_artifact(
             markdown=(
                 f"**Per-spaxel coefficients (spaxel {spax})**\n\n"
-                f"shifts: `{out / f'loop_shifts_spaxel_{spax}.json'}`\n\n"
-                f"widths: `{out / f'loop_widths_spaxel_{spax}.json'}`"
+                f"shifts: `{out / f'tester_loop_shifts_spaxel_{spax}.json'}`\n\n" #TODO: remove test
+                f"widths: `{out / f'tester_loop_widths_spaxel_{spax}.json'}`" #TODO: remove test
             ),
             key=f"wavelength-cal-spaxel-{spax}",
             description=f"Shift/width polynomial coefficients for spaxel {spax}",
@@ -600,14 +619,15 @@ def _final_fit_and_animate(spaxel: int, iteration_max: int, output_dir: Path, cl
 
     models = []
     for it in [0] + list(range(1, iteration_max, 2)):
-        with fits.open(f"spaxel_{spaxel}_iteration_{it}.fits") as hdul:
+        with fits.open(f"tester_spaxel_{spaxel}_iteration_{it}.fits") as hdul:
             models.append(hdul[0].data)  # type:ignore
+    gif_path = output_dir / f"tester_poly_convergence_{spaxel}.gif"
     animate_poly_convergence(
         science_image, models, total_widths, str(spaxel),
         row_range=(700, 3000), col_range=(970, 1100), x_range=(0, 1400),
         fps=2, fade_factor=0.6, image_labels=None, colsum_yscale="symlog",
+        output_file=str(gif_path),
     )
-    gif_path = output_dir / f"poly_convergence_{spaxel}.gif"
     create_markdown_artifact(
         markdown=f"**poly_convergence_{spaxel}.gif**\n\n`{gif_path}`",
         key=f"animation-spaxel-{spaxel}",
@@ -615,7 +635,7 @@ def _final_fit_and_animate(spaxel: int, iteration_max: int, output_dir: Path, cl
     )
     if cleanup_fits:
         for it in range(iteration_max + 1):
-            fits_path = Path(f"spaxel_{spaxel}_iteration_{it}.fits")
+            fits_path = Path(f"test_spaxel_{spaxel}_iteration_{it}.fits")
             if fits_path.exists():
                 fits_path.unlink()
 
@@ -652,8 +672,8 @@ def run_make_parameter_matrix(
         iteration += 1
         _save_spaxel_jsons(spaxels_to_process, output_dir, iteration)
 
-    shifts_path = output_dir / "loop_shifts_editable.json"
-    widths_path = output_dir / "loop_widths_editable.json"
+    shifts_path = output_dir / "tester_loop_shifts_editable.json"
+    widths_path = output_dir / "tester_loop_widths_editable.json"
     image.header.set("shift_coeff_path", str(shifts_path))
     image.header.set("width_coeff_path", str(widths_path))
     image.to_asdf(science_exposure_path)
@@ -667,11 +687,14 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--spaxels", type=str, default=None,
+    parser.add_argument("--spaxels", type=str, default="146",
                         help="Comma-separated spaxel indices, e.g. 0,1,2 or a range like 0-14")
-    parser.add_argument("--iteration-max", type=int, default=10)
+    parser.add_argument("--iteration-max", type=int, default=4)
     parser.add_argument("--output-dir", type=str, default=None,
                         help="Directory to write per-spaxel JSON files (default: cwd)")
+    parser.add_argument("--fresh", default="True", action="store_true",
+                        help="Ignore any existing tester_loop_shifts/widths_spaxel_*.json for these spaxels "
+                             "and start the shift/width correction from zero instead of resuming.")
     args = parser.parse_args()
 
     if args.spaxels is None:
@@ -683,14 +706,14 @@ if __name__ == "__main__":
         spaxels = [int(s) for s in args.spaxels.split(",")]
 
     output_dir = Path(args.output_dir) if args.output_dir else Path.cwd()
-    make_parameter_matrix_old(spaxels, iteration_max=args.iteration_max, output_dir=output_dir)
+    make_parameter_matrix_old(spaxels, iteration_max=args.iteration_max, output_dir=output_dir, fresh=args.fresh)
 
     combine_spaxel_jsons(output_dir)
     logger.info(f"Combined JSONs written to {output_dir}")
 
     for spaxel in spaxels:
         for it in range(args.iteration_max + 1):
-            fits_path = Path(f"spaxel_{spaxel}_iteration_{it}.fits")
+            fits_path = Path(f"tester_spaxel_{spaxel}_iteration_{it}.fits")
             if fits_path.exists():
                 fits_path.unlink()
     logger.info("Cleaned up fits files")

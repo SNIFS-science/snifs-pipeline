@@ -84,10 +84,12 @@ def subtract_dark(
 ) -> Image:
     # The darks can use a model *with* a stacked image, so it's not either or.
     dark_model = DarkModel.model_validate_json(dark_model_file.read_text())
-    dark_images = None
-    if use_dark_stack_if_possible and dark_image_file is not None:
+    has_time_on = image.header.get_optional_str("time_on_seconds") is not None
+    if use_dark_stack_if_possible and dark_image_file is not None and has_time_on:
         dark_images = Image.stack_from_fits_file(dark_image_file, transpose=True)
         return subtract_dark_stack(image, dark_images, dark_model)
+    if not has_time_on:
+        get_logger().warning("time_on_seconds not in header; falling back to dark model only.")
     return subtract_dark_model(image, dark_model)
 
 

@@ -28,6 +28,7 @@ def animate_poly_convergence(
     fade_factor=0.6,
     image_labels=None,
     colsum_yscale="symlog",
+    output_file=None,
 ):
     """Animate polynomial convergence with the same left-panel layout as animate_bin_metrics.
 
@@ -67,6 +68,8 @@ def animate_poly_convergence(
             f"coeffs_dict['{outer_key}'] has only {len(sorted_items)} entries but {n_models} models were provided."
         )
 
+    print(f"number of models: {n_models}")
+    print(f"number of coeffs_dict entries: {len(sorted_items)}, sorted items are {sorted_items}")
     iter_labels = [kv[0] for kv in sorted_items]
     n_lines = len(sorted_items)
 
@@ -172,7 +175,184 @@ def animate_poly_convergence(
 
     anim = FuncAnimation(fig, update, frames=n_lines, blit=False, interval=int(1000 / fps))
 
-    output_file = f"poly_convergence_{outer_key}.gif"
+    if output_file is None:
+        output_file = f"poly_convergence_{outer_key}.gif"
+    anim.save(output_file, writer=PillowWriter(fps=fps), dpi=110)
+    plt.close(fig)
+    print(f"Saved → {output_file}")
+
+
+def animate_gl_convergence(
+    science_image,
+    models,
+    coeffs_dict,
+    outer_key,
+    frame_iterations,
+    gauss_vals,
+    lorentz_vals,
+    row_range,
+    col_range=(900, 1100),
+    x_range=(0, 1400),
+    fps=2,
+    fade_factor=0.6,
+    image_labels=None,
+    output_file=None,
+):
+    """Like animate_poly_convergence, but the bottom-right panel tracks the gauss/lorentz scales.
+
+    Intended for the gaussian/lorentzian width-scan stage: one frame per model, with the bottom-right
+    panel showing iteration on the x-axis and a scatter point per frame for the gaussian and
+    lorentzian width multipliers as they evolve.
+
+    Args:
+        science_image   : 2-D array
+        models          : list of 2-D arrays, one per frame
+        coeffs_dict     : dict {outer_key: {frame_label: [c4,c3,c2,c1,c0], ...}}  (width polynomial
+                          in effect at each frame, exactly one entry per model)
+        outer_key       : str  which outer key to animate
+        frame_iterations: list of int  iteration number for each frame (x-axis of the scatter)
+        gauss_vals      : list of float  gaussian width scale at each frame
+        lorentz_vals    : list of float  lorentzian width scale at each frame
+        row_range/col_range/x_range/fps/fade_factor/image_labels/output_file: as animate_poly_convergence.
+    """
+    inner = coeffs_dict[str(outer_key)]
+    sorted_items = sorted(inner.items(), key=lambda kv: int(kv[0]))
+
+    a0 = int(A0_PARAMS[int(outer_key)])
+    a1 = int(A1_PARAMS[int(outer_key)]) + 1
+    b0 = int(B0_PARAMS[int(outer_key)]) - 50
+    off = 50
+    if b0 < 0:
+        off += b0
+        b0 = 0
+    b1 = int(B1_PARAMS[int(outer_key)]) + 50 + 1
+
+    n_models = len(models)
+    if len(sorted_items) > n_models:
+        sorted_items = sorted_items[len(sorted_items) - n_models :]
+    elif len(sorted_items) < n_models:
+        raise ValueError(
+            f"coeffs_dict['{outer_key}'] has only {len(sorted_items)} entries but {n_models} models were provided."
+        )
+    if not (len(frame_iterations) == len(gauss_vals) == len(lorentz_vals) == n_models):
+        raise ValueError(
+            f"frame_iterations ({len(frame_iterations)}), gauss_vals ({len(gauss_vals)}), "
+            f"lorentz_vals ({len(lorentz_vals)}) must all match n_models ({n_models})."
+        )
+
+    iter_labels = [kv[0] for kv in sorted_items]
+    n_lines = len(sorted_items)
+
+    row_lo, row_hi = a0, a1
+    col_lo, col_hi = (b0 + b1) // 2 - 6, (b0 + b1) // 2 + 6
+    col_indices = np.arange(col_lo, col_hi)
+
+    # ── precompute diff cutouts and vertical sums ────────────────────────
+    diff_cutouts = [science_image[row_lo:row_hi, col_lo:col_hi] - m[row_lo:row_hi, col_lo:col_hi] for m in models]
+    all_diffs = np.stack(diff_cutouts)
+    vlo, vhi = np.nanpercentile(all_diffs, [1, 99])
+
+    diff_vsums = [np.nansum(dc, axis=0) for dc in diff_cutouts]
+    vsum_min = min(v.min() for v in diff_vsums)
+    vsum_max = max(v.max() for v in diff_vsums)
+    vsum_margin = max((vsum_max - vsum_min) * 0.1, 1e-8)
+
+    # ── precompute polynomials ───────────────────────────────────────────
+    x = np.linspace(x_range[0], x_range[1], 1000)
+    poly_ys = [np.poly1d(coeffs)(x) for _, coeffs in sorted_items]
+    all_y = np.concatenate(poly_ys)
+    y_lo, y_hi = np.nanmin(all_y), np.nanmax(all_y)
+    y_margin = max((y_hi - y_lo) * 0.08, 1e-8)
+
+    colors = plt.cm.Blues(np.linspace(0.3, 0.95, n_lines))
+
+    # ── layout ──────────────────────────────────────────────────────────
+    fig = plt.figure(figsize=(13, 6))
+    outer_gs = gridspec.GridSpec(1, 2, width_ratios=[1, 2], wspace=0.35, figure=fig)
+    left_gs = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=outer_gs[0], hspace=0.4)
+
+    # upper-left: diff image
+    ax_img = fig.add_subplot(left_gs[0])
+    im_handle = ax_img.imshow(diff_cutouts[0], aspect="auto", origin="lower", vmin=-vhi, vmax=vhi, cmap="RdBu_r")
+    fig.colorbar(im_handle, ax=ax_img, fraction=0.046, pad=0.04)
+    img_title = ax_img.set_title(
+        image_labels[0] if image_labels else f"iter {frame_iterations[0]}\nscience − model",
+        fontsize=9,
+    )
+    ax_img.set_xlabel("Column offset")
+    ax_img.set_ylabel("Row offset")
+
+    # lower-left: vertical sum
+    ax_vsum = fig.add_subplot(left_gs[1])
+    (vsum_line,) = ax_vsum.plot(col_indices, diff_vsums[0], color="steelblue", lw=1.2)
+    ax_vsum.set_xlim(col_lo, col_hi)
+    ax_vsum.set_ylim(vsum_min - vsum_margin, vsum_max + vsum_margin)
+    ax_vsum.set_xlabel("Column")
+    ax_vsum.set_ylabel("Summed counts")
+    ax_vsum.set_title("Vertical sum (science − model)", fontsize=9)
+
+    right_gs = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=outer_gs[1], height_ratios=[4, 1], hspace=0.3)
+
+    # right-top: polynomial accumulation
+    ax_poly = fig.add_subplot(right_gs[0])
+    ax_poly.set_xlim(x_range[0], x_range[1])
+    ax_poly.set_ylim(y_lo - y_margin, y_hi + y_margin)
+    ax_poly.set_ylabel("y")
+    ax_poly.set_title(f"Polynomial convergence  (key={outer_key})", fontsize=9)
+    ax_poly.axhline(0, color="k", lw=0.4, ls="--", alpha=0.3)
+
+    line_handles = []
+    for i, (y_vals, label) in enumerate(zip(poly_ys, iter_labels, strict=False)):
+        (ln,) = ax_poly.plot(x, y_vals, color=colors[i], alpha=0, lw=2, label=f"iter {label}")
+        line_handles.append(ln)
+    ax_poly.legend(loc="upper right", fontsize=7)
+
+    # right-bottom: gauss/lorentz scales vs iteration (twin y-axes, different ranges)
+    ax_g = fig.add_subplot(right_gs[1])
+    ax_l = ax_g.twinx()
+    it_arr = np.asarray(frame_iterations, dtype=float)
+    g_arr = np.asarray(gauss_vals, dtype=float)
+    l_arr = np.asarray(lorentz_vals, dtype=float)
+
+    x_pad = max((it_arr.max() - it_arr.min()) * 0.05, 0.5)
+    ax_g.set_xlim(it_arr.min() - x_pad, it_arr.max() + x_pad)
+    g_pad = max((g_arr.max() - g_arr.min()) * 0.2, 0.05)
+    l_pad = max((l_arr.max() - l_arr.min()) * 0.2, 0.05)
+    ax_g.set_ylim(g_arr.min() - g_pad, g_arr.max() + g_pad)
+    ax_l.set_ylim(l_arr.min() - l_pad, l_arr.max() + l_pad)
+
+    ax_g.set_xlabel("Iteration")
+    ax_g.set_ylabel("Gaussian scale", color="tab:blue", fontsize=8)
+    ax_l.set_ylabel("Lorentzian scale", color="tab:red", fontsize=8)
+    ax_g.tick_params(axis="y", labelcolor="tab:blue")
+    ax_l.tick_params(axis="y", labelcolor="tab:red")
+
+    g_scatter = ax_g.scatter([], [], color="tab:blue", marker="o", s=30, label="gaussian")
+    l_scatter = ax_l.scatter([], [], color="tab:red", marker="s", s=30, label="lorentzian")
+    ax_g.legend(
+        handles=[g_scatter, l_scatter], labels=["gaussian", "lorentzian"], loc="upper left", fontsize=7
+    )
+
+    fig.suptitle(f"Gauss/Lorentz evolution — key {outer_key}", fontsize=11)
+
+    # ── animation ───────────────────────────────────────────────────────
+    def update(frame):
+        im_handle.set_data(diff_cutouts[frame])
+        vsum_line.set_ydata(diff_vsums[frame])
+        img_title.set_text(
+            image_labels[frame] if image_labels else f"iter {frame_iterations[frame]}\nscience − model"
+        )
+        for i, ln in enumerate(line_handles):
+            if i <= frame:
+                ln.set_alpha(fade_factor ** (frame - i))
+        # reveal scatter points up to and including the current frame
+        g_scatter.set_offsets(np.column_stack([it_arr[: frame + 1], g_arr[: frame + 1]]))
+        l_scatter.set_offsets(np.column_stack([it_arr[: frame + 1], l_arr[: frame + 1]]))
+
+    anim = FuncAnimation(fig, update, frames=n_lines, blit=False, interval=int(1000 / fps))
+
+    if output_file is None:
+        output_file = f"gl_convergence_{outer_key}.gif"
     anim.save(output_file, writer=PillowWriter(fps=fps), dpi=110)
     plt.close(fig)
     print(f"Saved → {output_file}")

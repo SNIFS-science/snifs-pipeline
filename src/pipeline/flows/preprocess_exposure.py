@@ -134,7 +134,9 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
     # operate on the images/image with similar signatures. This makes the code easier to read, and
     # also a lot easier to test in isolation.
     if "time_on_seconds" not in primary_headers:
-        primary_headers["time_on_seconds"] = determine_timeon(conf.ccd_on_time_file, primary_headers)
+        timeon = determine_timeon(conf.ccd_on_time_file, primary_headers)
+        if timeon is not None:
+            primary_headers["time_on_seconds"] = timeon
     images = split_and_standardise(images, primary.channel, primary_headers)
     images = handle_saturation(images)
     if len(images) == 2:  # Binary offset model is only derived for 2 chip models.
@@ -203,8 +205,27 @@ if __name__ == "__main__":
         # raw_dir / "runs/run_id=25_057_001/continuum_red.fits",
         # raw_dir / "runs/run_id=25_057_001/continuum_blue.fits",
         # raw_dir / "runs/run_id=25_121_118/bias_red.fits",
-        # raw_dir / "runs/run_id=25_159_030/continuum_red.fits",
-        raw_dir / "runs/run_id=25_291_007/25_291_007_001_17_B.fits",
+        # raw_dir / "runs/run_id=25_196_027/25_196_027_003_17_B.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_001_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_002_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_003_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_004_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_005_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_006_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_007_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_008_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_009_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_010_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_011_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_012_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_013_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_014_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_015_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_016_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_017_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_018_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_019_03_R.fits",
+        raw_dir / "runs/run_id=06_168_035/06_168_035_020_03_R.fits",
     ]
     for file in files:
         assert Path(file).exists(), f"File {file} does not exist."

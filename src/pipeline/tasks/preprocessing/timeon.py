@@ -8,16 +8,20 @@ from pipeline.common import Headers, get_logger, pipeline_task
 
 
 @pipeline_task()
-def determine_timeon(timeon_file: Path, primary_headers: Headers) -> str:
+def determine_timeon(timeon_file: Path, primary_headers: Headers) -> str | None:
     channel = primary_headers.get_str("channel")
     date_obs = dt.fromisoformat(primary_headers.get_str("time_observation")).replace(tzinfo=tz.utc)
     """For historical reasons, this is a float in number of seconds since the detector was on... but as a string."""
+    channel_df = pl.read_parquet(timeon_file).filter(pl.col("channel").eq(channel))
+    before = channel_df.filter(pl.col("time") <= date_obs).sort("time", descending=True).head(1)
+    if len(before) == 0:
+        get_logger().warning(
+            f"No on-time entry found before {date_obs.isoformat()} for channel {channel} "
+            f"in {timeon_file.name}. time_on_seconds will not be set; dark subtraction will use model only."
+        )
+        return None
     seconds_since_on = (
-        pl.read_parquet(timeon_file)
-        .filter(pl.col("channel").eq(channel))
-        .filter(pl.col("time") <= date_obs)
-        .sort("time", descending=True)
-        .head(1)
+        before
         .with_columns(seconds_since_on=(date_obs - pl.col("time")).dt.total_seconds().cast(pl.Float64))[
             "seconds_since_on"
         ]
@@ -27,9 +31,4 @@ def determine_timeon(timeon_file: Path, primary_headers: Headers) -> str:
         f"Determined time_on_seconds value {seconds_since_on} seconds for channel {channel} "
         f"from file {timeon_file.name} at date {date_obs.isoformat()}"
     )
-    # if seconds_since_on > 24 * 3600:
-    #     raise ValueError(
-    #         f"Timeon value {seconds_since_on} is greater than 24 hours, which is unexpected."
-    #         "You may need to get the latest logs."
-    #     )
     return str(seconds_since_on)
