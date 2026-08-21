@@ -52,13 +52,15 @@ except ImportError:  # Prefect 2
 # ==============================================================================
 # ENVIRONMENT & CONFIGURATION
 # ==============================================================================
-CUDA_DIR = os.environ.get("CUDA_HOME", r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3")
-_cuda_bin = os.path.join(CUDA_DIR, "bin")
-if os.path.isdir(_cuda_bin):
-    os.environ["CUDA_HOME"] = CUDA_DIR
+CUDA_DIR = os.environ.get("CUDA_HOME")
+if CUDA_DIR:
     os.environ["CUDA_PATH"] = CUDA_DIR
+    
+    _cuda_bin = os.path.join(CUDA_DIR, "bin")
     if _cuda_bin not in os.environ.get("PATH", ""):
         os.environ["PATH"] = f"{_cuda_bin}{os.pathsep}{os.environ.get('PATH', '')}"
+else:
+    get_run_logger().warning("CUDA_HOME is not set. Did you forget to run 'module load cudatoolkit'?")
 os.environ.setdefault("DASK_DISTRIBUTED__DIAGNOSTICS__NVML", "False")
 # dask.config.set({"distributed.scheduler.worker-saturation": 1.1})
 
@@ -97,20 +99,57 @@ POLY_DEGREE = 4
 POLY_NCOEF = POLY_DEGREE + 1
 IDX_DTYPE = np.int32
 
-#TODO tasks 1, 2, and 3 the bin_saves, outdir and fits file path
-folder_path = "./bin_saves"
-out_dir = "./spaxel_fits/"
-fits_path = os.environ.get(
-    "SNIFS_TEST_FITS",
-    "C:/Users/gibis/URAP/snifs-pipeline/output/level=preprocessed/deep_skyflat_coadd.fits",
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--group", 
+    type=int, 
+    required=True,
+    help="Specify which group to forward model (0-14)."
 )
+
+parser.add_argument(
+    "--fits-path", 
+    type=str, 
+    required=True,
+    help="The file path to the target FITS file."
+)
+
+parser.add_argument(
+    "--output-dir", 
+    type=str, 
+    required=True,
+    help="The file path to the save folder."
+)
+
+args = parser.parse_args()
+
+
+
+
+GROUP_MODELED = args.group
+
+print(args.output_dir)
+#TODO tasks 1, 2, and 3 the bin_saves, outdir and fits file path
+from pathlib import Path
+
+
+
+
+save_path = args.output_dir
+
+folder_path = f"{save_path}/bin_saves"
+out_dir = f"{save_path}/spaxel_fits"
+
+Path(out_dir).mkdir(parents=True, exist_ok=True)
+Path(folder_path).mkdir(parents=True,exist_ok=True)
+fits_path = args.fits_path
 
 yoff = 0
 n_bins = 255
 heights = np.linspace(0, 4095, 256)
 
-os.makedirs(folder_path, exist_ok=True)
-os.makedirs(out_dir, exist_ok=True)
 
 from pipeline.common.model_params import A0_PARAMS, A1_PARAMS
 from pipeline.tasks.processing.build_forward_group import (
@@ -321,9 +360,6 @@ def get_group_spectra(spax_id: int) -> np.ndarray:
     return out
 
 
-# ==============================================================================
-# NUMERICS
-# ==============================================================================
 def compute_bin_stats(model_1d, science_1d) -> np.ndarray:
     bin_idx = get_bin_index()
     w = np.abs(np.subtract(science_1d, model_1d))
@@ -339,7 +375,6 @@ def compute_bin_stats(model_1d, science_1d) -> np.ndarray:
 
 
 def fit_best_shift(shifts, values, degree=POLY_DEGREE):
-
     shifts = np.asarray(shifts, dtype=float)
     values = np.asarray(values, dtype=float)
     m = np.isfinite(shifts) & np.isfinite(values)
@@ -358,7 +393,7 @@ def fit_best_shift(shifts, values, degree=POLY_DEGREE):
 
 
 def make_next_scalar_shifts(prev_shifts, whole_losses, n_params):
-    return np.asarray(prev_shifts, dtype=float) * 0.9
+    return np.asarray(prev_shifts, dtype=float)
     # prev = np.asarray(prev_shifts, dtype=float)
     # whole = np.asarray(whole_losses, dtype=float)
     # if whole.size == 0 or np.all(np.isnan(whole)):
@@ -378,9 +413,6 @@ def np_interp_nearest(x_new, x, y):
     return np.where((x_new - x[idx - 1]) < (x[idx] - x_new), y[idx - 1], y[idx])
 
 
-# ==============================================================================
-# TASKS
-# ==============================================================================
 @task(name="Build_Matrices_GPU", **_TASK_KW)
 def build_matrices_task(spax_id, is_offset, shifts, off_poly, wid_poly):
     t0 = time.perf_counter()
@@ -715,7 +747,7 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
             releases.append(_submit_pinned(release_matrices_task, resolved_payload["origin"], "GPU", resolved_payload))
 
         for group_id in range(NUM_GROUPS):
-            if group_id != 9:
+            if group_id != GROUP_MODELED:
                 continue
             for spax_id in range(group_id * SPAXELS_PER_GROUP, (group_id + 1) * SPAXELS_PER_GROUP):
                 while len(inflight) >= MAX_SPAXELS_IN_FLIGHT:
@@ -848,7 +880,7 @@ def main():
         resources={"CPU": 1},
         preload=[module_name],
         env=worker_env,
-        dashboard_address=os.environ.get("SNIFS_DASHBOARD", ":8787"),
+        dashboard_address=os.environ.get("SNIFS_DASHBOARD", ":0"),
     ) as cluster:
         sched = cluster.scheduler_address
 
