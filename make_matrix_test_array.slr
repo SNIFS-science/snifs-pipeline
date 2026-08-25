@@ -1,0 +1,78 @@
+#!/bin/bash -l
+# TEST script: single debug-node job that packs as many spaxels onto the node's
+# cores as will fit, all running concurrently as srun steps against a shared
+# Prefect server (no array, no master job, no separate worker jobs).
+#
+#SBATCH --job-name=matrix-test
+#SBATCH --time=02:00:00
+#SBATCH -A m112
+#SBATCH -C cpu
+#SBATCH -q shared
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=40
+#SBATCH --cpus-per-task=2
+#SBATCH -o matrix_test_%j.out
+
+# Ensure uv (installed via `make install_uv` to ~/.local/bin) is on PATH.
+export PATH="$HOME/.local/bin:$PATH"
+
+# $HOME is NERSC's "global homes" filesystem, which doesn't support the file
+# locking uv's cache needs — concurrent `uv run` calls there fail with
+# "Could not acquire lock ... Unknown error 524". Point the cache at $PSCRATCH
+# (Lustre, supports real locking) instead, which matters a lot now that up to
+# 64 `uv run` processes start at nearly the same instant below.
+export UV_CACHE_DIR="$PSCRATCH/uv-cache"
+mkdir -p "$UV_CACHE_DIR"
+
+# and --ntasks-per-node together (in lockstep) if that ever changes.
+# TODO: first spaxel to process (e.g. 135 to start mid-way through the 225).
+GROUP_START=135
+NUM_SPAXELS=40   # must match --ntasks-per-node above
+
+OUTPUT_DIR="$SCRATCH/snifs-pipeline/output/make_matrix_test"
+mkdir -p "$OUTPUT_DIR"
+
+cd $HOME/snifs-pipeline   # TODO: match your actual repo checkout path
+
+# Pre-build the venv so srun steps below don't each try to sync at once.
+uv sync
+
+# --- Prefect server ---
+export PREFECT_HOME="/tmp/prefect_server_${USER}_${SLURM_JOB_ID}"
+PREFECT_PORT=8100
+COMPUTE_NODE=$(hostname)
+export PREFECT_API_URL="http://${COMPUTE_NODE}:${PREFECT_PORT}/api"
+# Tell the UI's JavaScript to reach the API through the SSH tunnel, not directly
+export PREFECT_UI_API_URL="http://localhost:9999/api"
+
+SERVER_INFO_FILE="${OUTPUT_DIR}/prefect_server_info.env"
+echo "PREFECT_API_URL=${PREFECT_API_URL}" > "$SERVER_INFO_FILE"
+
+echo "==========================================================="
+echo "Prefect server: ${COMPUTE_NODE}:${PREFECT_PORT}"
+echo "To watch the UI:  ssh -L 9999:${COMPUTE_NODE}:${PREFECT_PORT} ${USER}@perlmutter.nersc.gov"
+echo "then open:        http://localhost:9999"
+echo "==========================================================="
+
+uv run --no-sync prefect server start --host 0.0.0.0 --port $PREFECT_PORT &
+SERVER_PID=$!
+sleep 15
+
+# --- Pack all spaxels onto this node as concurrent srun steps ---
+echo "Packing ${NUM_SPAXELS} spaxels (starting at ${GROUP_START}) onto 1 debug node"
+
+for i in $(seq 0 $((NUM_SPAXELS - 1))); do
+    SPAXEL=$((GROUP_START + i))
+    srun --exclusive -N1 -n1 -c"$SLURM_CPUS_PER_TASK" \
+        uv run --no-sync python src/pipeline/tasks/processing/make_parameter_matrix.py \
+        --spaxels "$SPAXEL" \
+        --output-dir "$OUTPUT_DIR" &
+done
+
+wait
+echo "All ${NUM_SPAXELS} spaxels finished"
+
+# --- Shut down server ---
+kill $SERVER_PID
+wait $SERVER_PID 2>/dev/null
+echo "Prefect server stopped."

@@ -1,6 +1,12 @@
+export PATH := $(HOME)/.local/bin:$(PATH)
+
 install_uv:
-	@if [ -f "uv" ]; then echo "Downloading uv" && curl -LsSf https://astral.sh/uv/install.sh | sh; else echo "uv already installed"; fi
-	uv self update
+	@if ! command -v uv >/dev/null 2>&1; then \
+		echo "Downloading uv"; \
+		curl -LsSf https://astral.sh/uv/install.sh | sh; \
+	else \
+		echo "uv already installed"; \
+	fi
 
 install_python:
 	uv python install
