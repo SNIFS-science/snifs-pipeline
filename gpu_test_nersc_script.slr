@@ -1,0 +1,109 @@
+#!/bin/bash
+#SBATCH --job-name=snifs_test_group9
+#SBATCH --time=00:15:00                     # the cpu portion takes abt 5.7 mins but everything needs to sync between iters
+#SBATCH -A m112    #CHANGE HERE!!!!
+#SBATCH -C "gpu&hbm80g"                # Request Perlmutter 80GB A100 GPU nodes
+#SBATCH -q debug                        # debug because testing for now 30 min limit
+#SBATCH -N 1                            # 1 full GPU node
+#SBATCH --gpus-per-node=4
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=64
+#SBATCH --output=matrix_test_GPU_%j.out
+#SBATCH --error=matrix_test_GPU_%j.err
+
+# ==============================================================================
+# ENVIRONMENT SETUP
+# ==============================================================================
+module load cudatoolkit/13.2
+export PATH="$HOME/.local/bin:$PATH"
+export UV_CACHE_DIR="$PSCRATCH/uv-cache"
+mkdir -p "$UV_CACHE_DIR"
+
+
+
+OUTPUT_DIR="$SCRATCH/snifs-pipeline/output/make_matrix_GPU_accelerated_test"
+mkdir -p "$OUTPUT_DIR"
+
+
+
+# Pre-build the venv so srun steps below don't each try to sync at once.
+uv sync
+
+# --- Prefect server ---
+export PREFECT_HOME="/tmp/prefect_server_${USER}_${SLURM_JOB_ID}"
+PREFECT_PORT=8100
+COMPUTE_NODE=$(hostname)
+export PREFECT_API_URL="http://${COMPUTE_NODE}:${PREFECT_PORT}/api"
+# Tell the UI's JavaScript to reach the API through the SSH tunnel, not directly
+export PREFECT_UI_API_URL="http://localhost:9999/api"
+
+SERVER_INFO_FILE="${OUTPUT_DIR}/prefect_server_info.env"
+echo "PREFECT_API_URL=${PREFECT_API_URL}" > "$SERVER_INFO_FILE"
+
+echo "==========================================================="
+echo "Prefect server: ${COMPUTE_NODE}:${PREFECT_PORT}"
+echo "To watch the UI: ssh -L 9999:${COMPUTE_NODE}:${PREFECT_PORT} ${USER}@perlmutter.nersc.gov"
+echo "then open:         http://localhost:9999"
+echo "==========================================================="
+
+uv run --no-sync prefect server start --host 0.0.0.0 --port $PREFECT_PORT &
+SERVER_PID=$!
+sleep 15
+
+
+
+
+
+
+
+export CUDA_PATH=$CUDA_HOME
+
+# Memory and Worker configuration:
+export MODEL_CPU_WORKERS=32
+export MODEL_CPU_MEM="3.5GiB"            # 56 workers * 4.2 = 235 GB (Safely under 256GB limit)
+export MODEL_GPU_MEM="16GiB"             # Per-task VRAM allocation (4 workers per 80GB GPU)
+
+# To saturate 56 CPU cores, we need ~10-15 GPU matrices waiting in the queue.
+# 12 inflight matrices * 5.5 perturbations = ~66 CPU tasks ready to go.
+export MODEL_INFLIGHT=12
+
+# Threading control irrelevant not using pypardiso right now
+# export OMP_NUM_THREADS=1
+# export MKL_NUM_THREADS=1
+
+# ==============================================================================
+# NVIDIA MPS SETUP
+# ==============================================================================
+# Highly recommended to leave this ON. It forces the 4 Dask workers on each
+# GPU to share memory contexts and execute concurrent kernels safely.
+mkdir -p /tmp/nvidia-mps /tmp/nvidia-log
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps
+export CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-log
+nvidia-cuda-mps-control -d
+
+#CHANGE HERE
+GROUP_NUM=9 #0-14
+FITS_PATH="" #ADDPATH
+
+
+
+# ==============================================================================
+# EXECUTION
+# ==============================================================================
+echo "Forward Modeling group ${GROUP_NUM} on Perlmutter GPU Node"
+
+srun --gpu-bind=none uv run --no-sync python src/pipeline/tasks/processing/NERSC_test_run_one_group.py \
+    --group "$GROUP_NUM" \
+    --output-dir "$OUTPUT_DIR" \
+    --fits-path "$FITS_PATH"
+
+echo "Job completed successfully."
+
+# ==============================================================================
+# CLEANUP
+# ==============================================================================
+
+kill $SERVER_PID
+wait $SERVER_PID 2>/dev/null
+echo "Prefect server stopped."
+echo quit | nvidia-cuda-mps-control
