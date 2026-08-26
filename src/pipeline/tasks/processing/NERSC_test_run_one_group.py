@@ -6,11 +6,12 @@ from __future__ import annotations
 import atexit
 import importlib
 import os
+
 # Limit MKL to 1 thread to prevent exponential memory buffer allocations
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
+# os.environ["MKL_NUM_THREADS"] = "1"
+# os.environ["NUMEXPR_NUM_THREADS"] = "1"
+# os.environ["OMP_NUM_THREADS"] = "1"
+# os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import subprocess
 import sys
 import time
@@ -19,20 +20,21 @@ import uuid
 from collections import deque
 from contextlib import contextmanager, nullcontext
 from multiprocessing.shared_memory import SharedMemory
-import scipy.sparse as sp
 
 import dask
-dask.config.set({
-    # Prevent Dask from over-submitting tasks to workers beyond capacity (default was 1.1)
-    "distributed.diagnostics.nvml": False,
-    "distributed.scheduler.worker-saturation": 0.8,
-    
-    # Memory management limits relative to worker memory_limit (e.g., CPU_MEM_LIMIT)
-    "distributed.worker.memory.target": 0.65,   # Start spilling/clearing unneeded data at 60%
-    "distributed.worker.memory.spill": 0.75,    # Aggressive memory management at 70%
-    "distributed.worker.memory.pause": 0.80,    # Stop starting NEW tasks when worker reaches 80%
-    "distributed.worker.memory.terminate": 0.95 # Terminate worker if it hits 95% to prevent OS crash
-})
+
+dask.config.set(
+    {
+        # Prevent Dask from over-submitting tasks to workers beyond capacity (default was 1.1)
+        "distributed.diagnostics.nvml": False,
+        "distributed.scheduler.worker-saturation": 0.8,
+        # Memory management limits relative to worker memory_limit (e.g., CPU_MEM_LIMIT)
+        "distributed.worker.memory.target": 0.65,  # Start spilling/clearing unneeded data at 60%
+        "distributed.worker.memory.spill": 0.75,  # Aggressive memory management at 70%
+        "distributed.worker.memory.pause": 0.80,  # Stop starting NEW tasks when worker reaches 80%
+        "distributed.worker.memory.terminate": 0.95,  # Terminate worker if it hits 95% to prevent OS crash
+    }
+)
 import dask.config
 import numpy as np
 from astropy.io import fits
@@ -45,7 +47,7 @@ from scipy.sparse.linalg import spsolve
 try:  # Prefect 3
     from prefect.cache_policies import NO_CACHE
 
-    _TASK_KW = {"cache_policy": NO_CACHE, "retries": 3,"retry_delay_seconds":2}
+    _TASK_KW = {"cache_policy": NO_CACHE, "retries": 3, "retry_delay_seconds": 2}
 except ImportError:  # Prefect 2
     _TASK_KW = {"retries": 0}
 
@@ -55,7 +57,7 @@ except ImportError:  # Prefect 2
 CUDA_DIR = os.environ.get("CUDA_HOME")
 if CUDA_DIR:
     os.environ["CUDA_PATH"] = CUDA_DIR
-    
+
     _cuda_bin = os.path.join(CUDA_DIR, "bin")
     if _cuda_bin not in os.environ.get("PATH", ""):
         os.environ["PATH"] = f"{_cuda_bin}{os.pathsep}{os.environ.get('PATH', '')}"
@@ -83,9 +85,9 @@ NUM_GPUS = 4
 NUM_CPU_WORKERS = _envint("MODEL_CPU_WORKERS", 32)
 NUM_WORKERS_PER_GPU = 4
 CPU_MEM_LIMIT = os.environ.get("MODEL_CPU_MEM", "3.5GiB")
-GPU_MEM_LIMIT = os.environ.get("MODEL_GPU_MEM", "10GiB")
+GPU_MEM_LIMIT = os.environ.get("MODEL_GPU_MEM", "16GiB")
 
-MAX_SPAXELS_IN_FLIGHT = _envint("MODEL_INFLIGHT", 12) 
+MAX_SPAXELS_IN_FLIGHT = _envint("MODEL_INFLIGHT", 12)
 BUILD_PERTS_ONE_AT_A_TIME = False
 
 DETECTOR_SHAPE = (4096, 2048)
@@ -102,40 +104,20 @@ IDX_DTYPE = np.int32
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--group", 
-    type=int, 
-    required=True,
-    help="Specify which group to forward model (0-14)."
-)
+parser.add_argument("--group", type=int, required=True, help="Specify which group to forward model (0-14).")
 
-parser.add_argument(
-    "--fits-path", 
-    type=str, 
-    required=True,
-    help="The file path to the target FITS file."
-)
+parser.add_argument("--fits-path", type=str, required=True, help="The file path to the target FITS file.")
 
-parser.add_argument(
-    "--output-dir", 
-    type=str, 
-    required=True,
-    help="The file path to the save folder."
-)
+parser.add_argument("--output-dir", type=str, required=True, help="The file path to the save folder.")
 
 args = parser.parse_args()
-
-
 
 
 GROUP_MODELED = args.group
 
 print(args.output_dir)
-#TODO tasks 1, 2, and 3 the bin_saves, outdir and fits file path
+# TODO tasks 1, 2, and 3 the bin_saves, outdir and fits file path
 from pathlib import Path
-
-
-
 
 save_path = args.output_dir
 
@@ -143,7 +125,7 @@ folder_path = f"{save_path}/bin_saves"
 out_dir = f"{save_path}/spaxel_fits"
 
 Path(out_dir).mkdir(parents=True, exist_ok=True)
-Path(folder_path).mkdir(parents=True,exist_ok=True)
+Path(folder_path).mkdir(parents=True, exist_ok=True)
 fits_path = args.fits_path
 
 yoff = 0
@@ -167,6 +149,7 @@ except Exception:
     cp = None
     HAS_GPU = False
 
+
 def _to_ascending(c):
     """np.polyfit order (x^4 first) -> builder order (constant first).
 
@@ -176,6 +159,8 @@ def _to_ascending(c):
     only here. Works for both (5,) and (15, 5).
     """
     return np.ascontiguousarray(np.asarray(c, dtype=np.float64)[..., ::-1])
+
+
 # ==============================================================================
 # PER-PROCESS STATE & SHARED MEMORY
 # ==============================================================================
@@ -288,7 +273,9 @@ def assemble_triplets(neighbor_meta, target_meta):
                 except BufferError:
                     pass
         handles.clear()
-        import gc; gc.collect()
+        import gc
+
+        gc.collect()
 
     return data, rows, cols
 
@@ -306,8 +293,8 @@ def get_science_image() -> np.ndarray:
             raise ValueError(f"FITS shape {arr.shape} != {DETECTOR_SHAPE}")
     except Exception:
         arr = np.zeros(DETECTOR_SHAPE, dtype=np.float64)
-        raise ValueError(f"FITS shape error")
-    
+        raise ValueError("FITS shape error")
+
     img = arr.ravel()
     img.flags.writeable = False
     st["science_flat"] = img
@@ -332,10 +319,7 @@ def get_spec_list():
     st = _worker_store()
     s = st.get("spec")
     if s is None:
-        s = [
-            np.ones(SPEC_LEN, dtype=np.float64)
-            for _ in range(NUM_SPAXELS)
-        ]
+        s = [np.ones(SPEC_LEN, dtype=np.float64) for _ in range(NUM_SPAXELS)]
         st["spec"] = s
     return s
 
@@ -369,7 +353,7 @@ def compute_bin_stats(model_1d, science_1d) -> np.ndarray:
     sums = np.bincount(bin_idx, weights=w, minlength=n_bins + 1)[:n_bins]
     counts = np.bincount(bin_idx, weights=finite.astype(np.float64), minlength=n_bins + 1)[:n_bins]
     with np.errstate(invalid="ignore", divide="ignore"):
-        stats = np.where(counts > 0, sums , np.nan)#/ np.maximum(counts, 1.0)
+        stats = np.where(counts > 0, sums, np.nan)  # / np.maximum(counts, 1.0)
     del w, finite, sums, counts
     return stats.astype(np.float64)
 
@@ -422,11 +406,9 @@ def build_matrices_task(spax_id, is_offset, shifts, off_poly, wid_poly):
     n_pert = int(shifts.size)
     token = f"{spax_id}-{uuid.uuid4().hex[:12]}"
 
-
-    neighbor = build_neighbor_matrix(target_spaxel=spax_id,
-                                    offsets=_to_ascending(off_poly),
-                                    widths=_to_ascending(wid_poly),
-                                    oversample_factor=4)
+    neighbor = build_neighbor_matrix(
+        target_spaxel=spax_id, offsets=_to_ascending(off_poly), widths=_to_ascending(wid_poly), oversample_factor=4
+    )
     neighbor_meta = _put_triplet(neighbor)
     del neighbor
 
@@ -440,19 +422,19 @@ def build_matrices_task(spax_id, is_offset, shifts, off_poly, wid_poly):
                 offsets=_to_ascending(off_poly),
                 o_pert=one if is_offset else None,
                 w_pert=None if is_offset else one,
-                oversample_factor=4
+                oversample_factor=4,
             )
             trip = res[0] if len(res) == 1 else res[k]
             pert_metas.append(_put_triplet(trip))
             del res, trip
     else:
         res = build_target_matrix(
-                target_spaxel=spax_id,
-                widths=_to_ascending(wid_poly),
-                offsets=_to_ascending(off_poly),
-                o_pert=shifts if is_offset else None,
-                w_pert=None if is_offset else shifts,
-                oversample_factor=4
+            target_spaxel=spax_id,
+            widths=_to_ascending(wid_poly),
+            offsets=_to_ascending(off_poly),
+            o_pert=shifts if is_offset else None,
+            w_pert=None if is_offset else shifts,
+            oversample_factor=4,
         )
         while res:
             pert_metas.append(_put_triplet(res.pop(0)))
@@ -487,6 +469,7 @@ def build_matrices_task(spax_id, is_offset, shifts, off_poly, wid_poly):
 @task(name="Solve_Perturbation_CPU", **_TASK_KW)
 def solve_perturbation_task(payload, p_idx):
     import gc
+
     t0 = time.perf_counter()
     spax_id = payload["spax_id"]
 
@@ -495,13 +478,13 @@ def solve_perturbation_task(payload, p_idx):
     group_id = spax_id // SPAXELS_PER_GROUP
     base_col = group_id * SPAXELS_PER_GROUP * SPEC_LEN
     cols -= base_col
-    
+
     A = sparse.csr_matrix(
         (data, (rows.astype(np.int64, copy=False), cols.astype(np.int64, copy=False))),
         shape=MATRIX_SHAPE,
     )
     del data, rows, cols
-    gc.collect() # Force cleanup of shared memory views
+    gc.collect()  # Force cleanup of shared memory views
 
     science = get_science_image()
     group_spec = get_group_spectra(spax_id)
@@ -513,8 +496,7 @@ def solve_perturbation_task(payload, p_idx):
     else:
         b = np.array(science, dtype=np.float64)
         raise RuntimeError(
-            f"Shape mismatch: group_spec length ({group_spec.shape[0]}) "
-            f"does not match matrix columns ({A.shape[1]})"
+            f"Shape mismatch: group_spec length ({group_spec.shape[0]}) does not match matrix columns ({A.shape[1]})"
         )
 
     try:
@@ -530,14 +512,14 @@ def solve_perturbation_task(payload, p_idx):
         # If OOM hits during the solve or matrix mult, catch it and fail gracefully
         get_run_logger().error(f"OOM caught on Spaxel {spax_id}: {str(e)} performing perturbation: {p_idx}")
         raise RuntimeError("Task failed due to out-of-memory error.") from e
-        
+
     finally:
         # Guarantee PARDISO frees memory even if the solve fails
-        if 'solver' in locals():
+        if "solver" in locals():
             solver.free_memory()
             del solver
         # Clean up all heavy intermediates
-        for var in ['AtA_upper', 'Atb', 'At', 'AtA']:
+        for var in ["AtA_upper", "Atb", "At", "AtA"]:
             if var in locals():
                 del locals()[var]
         gc.collect()
@@ -554,6 +536,7 @@ def solve_perturbation_task(payload, p_idx):
         "bin_stats": bin_stats,
         "solve_s": round(time.perf_counter() - t0, 2),
     }
+
 
 @task(name="Aggregate_Spaxel_CPU", **_TASK_KW)
 def aggregate_spaxel_task(spax_id, prev_state, results, is_offset, curr_shifts, curr_iter):
@@ -590,7 +573,7 @@ def aggregate_spaxel_task(spax_id, prev_state, results, is_offset, curr_shifts, 
 
         # 3. Perform the interpolation in matching units
         dense = np_interp_nearest(x_dense, active_centres, active_best_bins)
-        
+
         fittable = np.array(dense, dtype=float, copy=True)
         s0, s1 = min(220, fittable.size), min(540, fittable.size)
         fittable[s0:s1] = np.nan
@@ -614,12 +597,13 @@ def aggregate_spaxel_task(spax_id, prev_state, results, is_offset, curr_shifts, 
     else:
         new_state["width_shifts"] = next_shifts
         new_state["wid_poly"] = prev_state["wid_poly"] + coeffs
-        
+    
     zero_idx = int(np.argmin(np.abs(curr_shifts)))
-    new_state["last_loss"] = float(losses[zero_idx])   # loss at current accumulated state
-# new_state["loss_frac"] = float(losses[zero_idx] / results[zero_idx]["b_abs_sum"])
+    new_state["last_loss"] = float(losses[zero_idx])  # loss at current accumulated state
+    # new_state["loss_frac"] = float(losses[zero_idx] / results[zero_idx]["b_abs_sum"])
 
     return new_state
+
 
 @task(name="Release_SHM_GPU", **_TASK_KW)
 def release_matrices_task(payload):
@@ -730,7 +714,7 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
             hist_off = spaxel_states[spax].get("off_poly_history", [])
             hist_wid = spaxel_states[spax].get("wid_poly_history", [])
             hist_loss = spaxel_states[spax].get("loss_history", [])
-            
+
             # This blocks until the CPU aggregation (and implicitly the GPU tasks) are done
             new_st = rec["agg"].result()
 
@@ -740,10 +724,10 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
             new_st["loss_history"] = hist_loss + [new_st["last_loss"]]
 
             spaxel_states[spax] = new_st
-            
+
             # NOW we resolve the GPU payload future to get the origin address for cleanup
             resolved_payload = rec["payload_fut"].result()
-            
+
             releases.append(_submit_pinned(release_matrices_task, resolved_payload["origin"], "GPU", resolved_payload))
 
         for group_id in range(NUM_GROUPS):
@@ -772,7 +756,7 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
 
                 # 2. Pass the future (payload_fut) directly into the CPU task
                 sol_futs = [_submit(solve_perturbation_task, cpu_addrs, "CPU", payload_fut, p) for p in range(n_pert)]
-                
+
                 agg = _submit(
                     aggregate_spaxel_task, cpu_addrs, "CPU", spax_id, st, sol_futs, is_offset, shifts, curr_iter
                 )
@@ -888,8 +872,8 @@ def main():
         merged = os.environ.copy()
         merged.update(worker_env)
         # Force all simulated workers to use your single laptop GPU (GPU 0)
-        merged["CUDA_VISIBLE_DEVICES"] = "0" 
-        
+        merged["CUDA_VISIBLE_DEVICES"] = "0"
+
         # 2. Launch 3 separate Dask workers, pinning them all to GPU 0
         num_gpu_workers = NUM_GPUS * NUM_WORKERS_PER_GPU
         gpu_procs = []
@@ -899,13 +883,23 @@ def main():
             worker_env["CUDA_VISIBLE_DEVICES"] = gpu_id
 
             gpu_cmd = [
-                sys.executable, "-m", "dask", "worker", sched,
-                "--nworkers", "1",
-                "--nthreads", "1",
-                "--resources", "GPU=1",
-                "--memory-limit", GPU_MEM_LIMIT,
-                "--preload", module_name,
-                "--name", f"gpu-worker-gpu{gpu_id}-{i}",
+                sys.executable,
+                "-m",
+                "dask",
+                "worker",
+                sched,
+                "--nworkers",
+                "1",
+                "--nthreads",
+                "1",
+                "--resources",
+                "GPU=1",
+                "--memory-limit",
+                GPU_MEM_LIMIT,
+                "--preload",
+                module_name,
+                "--name",
+                f"gpu-worker-gpu{gpu_id}-{i}",
             ]
             proc = subprocess.Popen(gpu_cmd, env=worker_env)
             gpu_procs.append(proc)
@@ -935,4 +929,4 @@ if __name__ == "__main__":
         _mod = sys.modules["__main__"]
     _mod.main()
 
-#105:120
+# 105:120
