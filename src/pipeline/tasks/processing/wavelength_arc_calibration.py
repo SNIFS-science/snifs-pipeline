@@ -1,4 +1,5 @@
-import multiprocessing
+
+from joblib import Parallel, delayed
 import time
 from functools import partial
 from pathlib import Path
@@ -132,14 +133,14 @@ def refine_peak_centers(
             upper = [np.inf, min(c + window, len(spectrum) - 1), np.inf, np.inf, 4.0, np.inf, np.inf]
 
             try:
-                popt, pcov, infodict, errmsg, ier = curve_fit(
+                popt, pcov = curve_fit(
                     double_gaussian,
                     x_fit,
                     y_fit,
                     p0=parameter_guess,
                     bounds=(lower, upper),
                     maxfev=20000,
-                    full_output=True,  # , jac=double_gaussian_jac
+                    #full_output=True,  # , jac=double_gaussian_jac
                 )
 
                 # TOTAL_ITER_DOUBLE.append(infodict['nfev'])
@@ -184,14 +185,14 @@ def refine_peak_centers(
             # print("Initial peak guess")
             # print(p_0_single)
             try:
-                popt, pcov, infodict, errmsg, ier = curve_fit(
+                popt, pcov = curve_fit(
                     gaussian,
                     x_fit,
                     y_fit,
                     p0=p_0_single,
                     bounds=(lower_single, upper_single),
                     maxfev=20000,
-                    full_output=True,  # , jac=gaussian_jac
+                    #full_output=True,  # , jac=gaussian_jac
                 )
 
                 # TOTAL_ITER_SINGLE.append(infodict['nfev'])
@@ -272,14 +273,14 @@ def refine_peak_centers_modified(
             upper = [np.inf, min(c + window, len(spectrum) - 1), np.inf, np.inf, 4.0, np.inf, np.inf]
 
             try:
-                popt, pcov, infodict, errmsg, ier = curve_fit(
+                popt, pcov = curve_fit(
                     double_gaussian,
                     x_fit,
                     y_fit,
                     p0=parameter_guess,
                     bounds=(lower, upper),
                     maxfev=20000,
-                    full_output=True,
+                    #full_output=True,
                     jac=double_gaussian_jac,
                 )
 
@@ -364,14 +365,14 @@ def refine_peak_centers_modified(
             p_0_single = [float(np.clip(p_0_single[i], lower_single[i], upper_single[i])) for i in range(4)]
 
             try:
-                popt, pcov, infodict, errmsg, ier = curve_fit(
+                popt, pcov = curve_fit(
                     gaussian,
                     x_fit,
                     y_fit,
                     p0=p_0_single,
                     bounds=(lower_single, upper_single),
                     maxfev=20000,
-                    full_output=True,
+                    #full_output=True,
                     jac=gaussian_jac,
                 )
 
@@ -483,6 +484,8 @@ def recal_spec(spectrum, peak_guesses, corresponding_wavelengths) -> tuple[np.nd
     return wavelengths_3, p_3, residuals**2
 
 
+
+
 # TRY THIS TO UNDERSTAND TRY TO UNDERSTAND THIS
 def calibrate_wavelength_arc(arcPath: Path) -> np.ndarray:
     """Args:
@@ -501,9 +504,11 @@ def calibrate_wavelength_arc(arcPath: Path) -> np.ndarray:
     residuals = []
 
     spaxels = [flux_array[i] for i in range(NUMBER_OF_SPAXELS)]
-    cal_spec_with_dict = partial(
-        cal_spec, peaks_dict=PEAKS_DICT
-    )  # why does cal_spec take in peaks dict if it stays the same
+
+
+    # cal_spec_with_dict = partial(
+    #     cal_spec, peaks_dict=PEAKS_DICT
+    # )  # why does cal_spec take in peaks dict if it stays the same
 
     # I could do
     # cores_to_use = multiprocessing.cpu_count() - 1
@@ -512,8 +517,16 @@ def calibrate_wavelength_arc(arcPath: Path) -> np.ndarray:
     print("starting parallel processes")
     monitor_parallel_start_ind = MONITOR.get_history_index()
     parallel_start = time.perf_counter()
-    with multiprocessing.Pool(processes=PROCESSING) as pool:
-        results = pool.map(cal_spec_with_dict, spaxels)
+    # with multiprocessing.Pool(processes=PROCESSING) as pool:
+    #     results = pool.map(cal_spec_with_dict, spaxels)
+
+
+    cal_spec_with_dict = partial(cal_spec, peaks_dict=PEAKS_DICT)
+    # Testing using Joblib isntead
+    results = Parallel(n_jobs=PROCESSING)(
+        delayed(cal_spec_with_dict)(s) for s in spaxels
+    )
+    
     wavelength_list = [item[0] for item in results]
     params = [item[1] for item in results]
     residuals = [item[2] for item in results]
@@ -594,7 +607,7 @@ def full_arc_calibration(preprocessed_arc: PreprocessSummary) -> None:
 # TODO: this top level function should take a pydantic configuration object so it can easily integrate with prefect
 if __name__ == "__main__":
     # START TRACKING TOTAL RAM
-#CHANGE PATHS HERE
+    # CHANGE PATHS HERE
     base_dir = Path("C:/Users/gibis/URAP/snifs-pipeline/data/level=raw")
     # data\level=raw\runs\run_id=25_056_084\science_red.fits
     # C:\Users\gibis\URAP\snifs-pipeline\data\level=raw\runs\run_id=25_056_084\science_red.fits
@@ -618,11 +631,12 @@ if __name__ == "__main__":
         # calibrate_wavelength_arc(file)
 
         # timer code
-        cpu_test_range = 6
+        cpu_test_range = 5
         PARALLEL_TIMER = [[] for k in range(cpu_test_range)]
         for j in range(cpu_test_range):
             PROCESSING = 2 + j * 2
-
+            if PROCESSING < 6:
+                continue
             for i in range(10):
                 print(f"COMMENCING RUN {i + 1}")
                 MONITOR = MemoryMonitor()
@@ -632,16 +646,16 @@ if __name__ == "__main__":
                 end = time.perf_counter()
                 print(f"TIME FOR RUN {i + 1} is {end - start}")
                 CURRENT_LAP[0].append(end - start)
-            #I think this should be extend maybe or parallel timer should just be a list, but it's too late now, I already wrote an inferencing file
+            # I think this should be extend maybe or parallel timer should just be a list, but it's too late now, I already wrote an inferencing file
             PARALLEL_TIMER[j].append(CURRENT_LAP)
 
             CURRENT_LAP = [[], [], [], [], []]
         # for a cpu run
         # print(f"IMPROVED RUNTIME: {np.mean([np.mean(PARALLEL_TIMER[0][i][0]) for i in range(len(PARALLEL_TIMER[0])) ])}")
-#SAVE PATH FOR NPY FILE
-#CHANGE PATHS HERE
-np.save(
-    "C:/Users/gibis/URAP/testing_for_snifs/performance_metrics_of_alg/refine_peaks_with_jacobian/parallel_time_ram_spaxels_corrected_peak_RAM.npy",
-    np.array(PARALLEL_TIMER, dtype=object),
-)
+# SAVE PATH FOR NPY FILE
+# CHANGE PATHS HERE
+        np.save(
+            "C:/Users/gibis/URAP/testing_for_snifs/performance_metrics_of_alg/refine_peaks_with_jacobian/peaks_dict_not_hard_coded.npy",
+            np.array(PARALLEL_TIMER, dtype=object),
+        )
 # np.save("C:/Users/gibis/URAP/testing_for_snifs/performance_metrics_of_alg/refine_peaks_with_jacobian/TOTAL_ITER_SINGLE_1cpu_jactime.npy",IMPROVED_TIME)
