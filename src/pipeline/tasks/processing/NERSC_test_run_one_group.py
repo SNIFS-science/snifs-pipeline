@@ -665,11 +665,22 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
     logger = get_run_logger()
     from dask.distributed import Client
 
+    wait_timeout = _envint("WORKER_WAIT_TIMEOUT", 600)
+    poll_s = 15
+    n_want = n_cpu_workers + n_gpu_workers
     with Client(sched_address, timeout="120s") as client:
-        client.wait_for_workers(n_cpu_workers + n_gpu_workers, timeout=300)
+        waited = 0
+        while len(client.scheduler_info()["workers"]) < n_want and waited < wait_timeout:
+            n_have = len(client.scheduler_info()["workers"])
+            logger.info("waiting for workers: %d/%d registered (%ds/%ds)", n_have, n_want, waited, wait_timeout)
+            time.sleep(poll_s)
+            waited += poll_s
+        # Raises WorkerStartTimeoutError with a clear final count if still short.
+        client.wait_for_workers(n_want, timeout=1)
         info = client.scheduler_info()["workers"]
         gpu_addrs = [a for a, i in info.items() if "GPU" in (i.get("resources") or {})]
         cpu_addrs = [a for a, i in info.items() if "CPU" in (i.get("resources") or {})]
+        logger.info("workers ready: %d CPU, %d GPU", len(cpu_addrs), len(gpu_addrs))
 
     # Added history tracking arrays for the polynomial outputs
     spaxel_states = {
@@ -896,6 +907,7 @@ def main():
                 "GPU=1",
                 "--memory-limit",
                 GPU_MEM_LIMIT,
+                "--no-nanny",
                 "--preload",
                 module_name,
                 "--name",

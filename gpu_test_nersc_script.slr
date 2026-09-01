@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=snifs_test_group9
-#SBATCH --time=00:15:00                     # the cpu portion takes abt 5.7 mins but everything needs to sync between iters
+#SBATCH --time=00:25:00                     # cpu portion ~5.7 min/iter + up to 10 min GPU worker startup (first-run kernel compile)
 #SBATCH -A m112    #CHANGE HERE!!!!
 #SBATCH -C "gpu&hbm80g"                # Request Perlmutter 80GB A100 GPU nodes
 #SBATCH -q debug                        # debug because testing for now 30 min limit
@@ -18,6 +18,21 @@ module load cudatoolkit/13.2
 export PATH="$HOME/.local/bin:$PATH"
 export UV_CACHE_DIR="$PSCRATCH/uv-cache"
 mkdir -p "$UV_CACHE_DIR"
+
+# $HOME is NERSC's "global homes" filesystem, which doesn't support the file
+# locking that cupy's kernel cache needs (same issue as UV_CACHE_DIR above).
+# cupy defaults to ~/.cupy/kernel_cache and JIT-compiles CUDA kernels there
+# on first import -- with 16 GPU dask workers all importing cupy at once via
+# --preload, they all race for that lock simultaneously and can hang
+# indefinitely, which is why GPU workers never registered while the 32 CPU
+# workers (no cupy import) came up fine. Point it at Lustre instead.
+export CUPY_CACHE_DIR="$PSCRATCH/cupy-cache"
+mkdir -p "$CUPY_CACHE_DIR"
+
+# How long to wait for all dask workers (CPU + GPU) to register before giving
+# up. GPU workers pay a one-time CUDA context + kernel compile cost on first
+# run at a given cache dir; give real headroom instead of the 300s default.
+export WORKER_WAIT_TIMEOUT=600
 
 
 
@@ -83,7 +98,7 @@ nvidia-cuda-mps-control -d
 
 #CHANGE HERE
 GROUP_NUM=9 #0-14
-FITS_PATH="" #ADDPATH
+FITS_PATH="global/homes/a/anousha/deep_skyflat_coadd.fits" #ADDPATH
 
 
 
