@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=snifs_test_group9
 #SBATCH --time=00:25:00                     # cpu portion ~5.7 min/iter + up to 10 min GPU worker startup (first-run kernel compile)
-#SBATCH -A m112    #CHANGE HERE!!!!
+#SBATCH -A m112 
 #SBATCH -C "gpu&hbm80g"                # Request Perlmutter 80GB A100 GPU nodes
 #SBATCH -q debug                        # debug because testing for now 30 min limit
 #SBATCH -N 1                            # 1 full GPU node
