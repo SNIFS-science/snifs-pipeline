@@ -98,7 +98,7 @@ nvidia-cuda-mps-control -d
 
 #CHANGE HERE
 GROUP_NUM=9 #0-14
-FITS_PATH="global/homes/a/anousha/deep_skyflat_coadd.fits" #ADDPATH
+FITS_PATH="/global/homes/a/anousha/deep_skyflat_coadd.fits" #ADDPATH
 
 
 

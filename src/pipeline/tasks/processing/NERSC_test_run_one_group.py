@@ -103,17 +103,41 @@ IDX_DTYPE = np.int32
 
 import argparse
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--group", type=int, required=True, help="Specify which group to forward model (0-14).")
+if {"SNIFS_GROUP", "SNIFS_FITS_PATH", "SNIFS_OUTPUT_DIR"} <= os.environ.keys():
+    # Preloaded into a worker process (e.g. the GPU workers, which launch as
+    # a fresh `python -m dask worker ...` subprocess) -- sys.argv here
+    # belongs to dask, not us, so parsing it crashes the worker. main()
+    # forwards the same three values via env instead; use those.
+    args = argparse.Namespace(
+        group=int(os.environ["SNIFS_GROUP"]),
+        fits_path=os.environ["SNIFS_FITS_PATH"],
+        output_dir=os.environ["SNIFS_OUTPUT_DIR"],
+    )
+else:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--group", type=int, required=True, help="Specify which group to forward model (0-14).")
 
-parser.add_argument("--fits-path", type=str, required=True, help="The file path to the target FITS file.")
+    parser.add_argument("--fits-path", type=str, required=True, help="The file path to the target FITS file.")
 
-parser.add_argument("--output-dir", type=str, required=True, help="The file path to the save folder.")
+    parser.add_argument("--output-dir", type=str, required=True, help="The file path to the save folder.")
 
-args = parser.parse_args()
+    parser.add_argument(
+        "--spaxel",
+        type=int,
+        default=None,
+        help="Optional: process only this one spaxel within the group (instead of all 15), for a quick test.",
+    )
+
+    args = parser.parse_args()
+
+    # Forward to worker subprocesses so they read env instead of re-parsing argv.
+    os.environ["SNIFS_GROUP"] = str(args.group)
+    os.environ["SNIFS_FITS_PATH"] = args.fits_path
+    os.environ["SNIFS_OUTPUT_DIR"] = args.output_dir
 
 
 GROUP_MODELED = args.group
+SPAXEL_ONLY = getattr(args, "spaxel", None)  # None => original behavior, all 15 spaxels in the group
 
 print(args.output_dir)
 # TODO tasks 1, 2, and 3 the bin_saves, outdir and fits file path
@@ -745,6 +769,8 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
             if group_id != GROUP_MODELED:
                 continue
             for spax_id in range(group_id * SPAXELS_PER_GROUP, (group_id + 1) * SPAXELS_PER_GROUP):
+                if SPAXEL_ONLY is not None and spax_id != SPAXEL_ONLY:
+                    continue
                 while len(inflight) >= MAX_SPAXELS_IN_FLIGHT:
                     retire_oldest()
 
@@ -864,6 +890,9 @@ def main():
         "OMP_NUM_THREADS": "1",
         "MKL_NUM_THREADS": "1",
         "OPENBLAS_NUM_THREADS": "1",
+        "SNIFS_GROUP": os.environ["SNIFS_GROUP"],
+        "SNIFS_FITS_PATH": os.environ["SNIFS_FITS_PATH"],
+        "SNIFS_OUTPUT_DIR": os.environ["SNIFS_OUTPUT_DIR"],
     }
     os.environ["PYTHONPATH"] = pythonpath
 
