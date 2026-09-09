@@ -506,7 +506,11 @@ def _run_one_spaxel_all_iterations(
     spectra = np.concatenate(spec[15 * (spax // 15) : 15 * (spax // 15 + 1)])
 
     # Neighbor rows never change across any iteration — compute once for this spaxel.
-    neighbor_mat = makeShiftedMat_neighbors.submit(spax, oversample_factor=4).result()
+    # Called via .fn() (bypassing Prefect's task-run orchestration) rather than
+    # .submit()/.result(): everything in this function already runs strictly
+    # sequentially, so .submit() bought no real concurrency, only ~150 tracked
+    # task runs' worth of API calls per spaxel against the shared Prefect server.
+    neighbor_mat = makeShiftedMat_neighbors.fn(spax, oversample_factor=4)
     logger.info(f"[spaxel {spax}] neighbors done | peak RSS {_peak_memory_mb():.0f} MB")
 
     for iteration in range(iteration_max):
@@ -520,22 +524,22 @@ def _run_one_spaxel_all_iterations(
             offset = param if is_offset_iter else 0.0
             width = param if not is_offset_iter else 0.0
 
-            target_mat = makeShiftedMat_target.submit(
+            target_mat = makeShiftedMat_target.fn(
                 spax, offset, width, oversample_factor=4, iteration=iteration
-            ).result()
+            )
             combined = neighbor_mat + target_mat
             del target_mat
 
-            model = fit.submit(combined, science_image, spectra, spaxel=spax, iteration=iteration, param=param).result()
+            model = fit.fn(combined, science_image, spectra, spaxel=spax, iteration=iteration, param=param)
             logger.info(
                 f"[spaxel {spax}] iter {iteration} param {param:+.2f} fit done | peak RSS {_peak_memory_mb():.0f} MB"
             )
             del combined
 
-            bin_stats_list.append(compute_bin_stats.submit(model, spax).result())
+            bin_stats_list.append(compute_bin_stats.fn(model, spax))
             del model
 
-        l1_calculations.submit([spax], bin_stats_list, len(iter_params), iteration, is_offset_iter).result()
+        l1_calculations.fn([spax], bin_stats_list, len(iter_params), iteration, is_offset_iter)
         _save_spaxel_jsons([spax], out, iteration + 1)
         logger.info(f"[spaxel {spax}] iter {iteration} complete | peak RSS {_peak_memory_mb():.0f} MB")
 
@@ -603,10 +607,10 @@ def _run_one_iteration_parallel(
 
 def _final_fit_and_animate(spaxel: int, iteration_max: int, output_dir: Path, cleanup_fits: bool) -> None:
     spectra = np.concatenate(spec[15 * (spaxel // 15) : 15 * (spaxel // 15 + 1)])
-    mat_future = makeShiftedMat.submit(
+    mat = makeShiftedMat.fn(
         spaxel, np.zeros(225), np.zeros(225), oversample_factor=4, iteration=iteration_max
     )
-    fit.submit(mat_future, science_image, spectra, spaxel=spaxel, iteration=iteration_max, param=0.0).result()
+    fit.fn(mat, science_image, spectra, spaxel=spaxel, iteration=iteration_max, param=0.0)
 
     models = []
     for it in [0] + list(range(1, iteration_max, 2)):
