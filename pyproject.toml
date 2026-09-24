@@ -26,6 +26,7 @@ dependencies = [
     "pydantic-settings>=2.8.1",
     "scikit-image>=0.26.0",
     "scipy>=1.15.3",
+    "urllib3==2.6.3",
 ]
 
 [project.optional-dependencies]
