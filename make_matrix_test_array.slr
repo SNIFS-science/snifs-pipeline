@@ -56,7 +56,15 @@ echo "==========================================================="
 
 uv run --no-sync prefect server start --host 0.0.0.0 --port $PREFECT_PORT &
 SERVER_PID=$!
-sleep 15
+
+# Poll the API instead of a fixed sleep, so we don't wait longer than necessary.
+for i in $(seq 1 60); do
+    if curl -s -o /dev/null -w "" "http://127.0.0.1:${PREFECT_PORT}/api/health"; then
+        echo "Prefect server ready after ${i}s"
+        break
+    fi
+    sleep 1
+done
 
 # --- Pack all spaxels onto this node as concurrent srun steps ---
 echo "Packing ${NUM_SPAXELS} spaxels (starting at ${GROUP_START}) onto 1 debug node"

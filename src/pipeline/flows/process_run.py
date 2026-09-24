@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, computed_field
 from pipeline.common.prefect_utils import pipeline_flow
 from pipeline.config.deployment import SnifsNerscDeploymentConfig, registry
 from pipeline.flows.preprocess_exposure import PreprocessExposureConfig, preprocess_exposure
+from pipeline.flows.wavelength_arc_calibration import WavelengthArcCalibrationConfig, wavelength_arc_calibration
 from pipeline.resolver.common import FileType, PipelineStage
 from pipeline.resolver.resolver import FlowConfig, get_run_id
 from pipeline.tasks.processing.make_parameter_matrix import run_make_parameter_matrix
@@ -124,5 +125,23 @@ if __name__ == "__main__":
     async def main() -> None:
         config = ProcessRunConfig(run_id="25_199_028", spaxels_to_process=[117])
         await process_run(config)
+
+        # Demo: link the converged shift/width fit model from run_make_parameter_matrix
+        # to wavelength calibration by running it against this run's preprocessed ARC exposure.
+        arc_filter = (
+            pl.col("run_id").eq(config.run_id)
+            & pl.col("level").eq("preprocessed")
+            & pl.col("file_type").eq(FileType.ARC.value)
+            & pl.col("channel").eq("B")
+        )
+        arc_paths = [Path(p) for p in config.resolver.file_store.filter(arc_filter)["file_path"]]
+        if arc_paths:
+            wavelength_config = WavelengthArcCalibrationConfig(
+                arc_exposure_path=arc_paths[0],
+                shift_coeff_path=config.output_folder / "tester_loop_shifts_editable.json",
+                width_coeff_path=config.output_folder / "tester_loop_widths_editable.json",
+                spaxels_to_process=config.spaxels_to_process,
+            )
+            wavelength_arc_calibration(wavelength_config)
 
     asyncio.run(main())

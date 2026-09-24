@@ -88,20 +88,25 @@ def combine_spaxel_jsons(output_dir: Path) -> None:
 
     Each job writes loop_shifts_spaxel_N.json and loop_widths_spaxel_N.json.
     Call this after all jobs finish to produce loop_shifts_editable.json and
-    loop_widths_editable.json containing every spaxel.
+    loop_widths_editable.json containing every spaxel, then remove the
+    individual per-spaxel files now that their contents are captured.
     """
     combined_shifts: dict = {}
     combined_widths: dict = {}
-    for path in sorted(output_dir.glob("tester_loop_shifts_spaxel_*.json")):
+    shift_paths = sorted(output_dir.glob("tester_loop_shifts_spaxel_*.json"))
+    width_paths = sorted(output_dir.glob("tester_loop_widths_spaxel_*.json"))
+    for path in shift_paths:
         with path.open("r") as f:
             combined_shifts.update(json.load(f))
-    for path in sorted(output_dir.glob("tester_loop_widths_spaxel_*.json")):
+    for path in width_paths:
         with path.open("r") as f:
             combined_widths.update(json.load(f))
     with (output_dir / "tester_loop_shifts_editable.json").open("w") as f:
         json.dump(combined_shifts, f, indent=2)
     with (output_dir / "tester_loop_widths_editable.json").open("w") as f:
         json.dump(combined_widths, f, indent=2)
+    for path in shift_paths + width_paths:
+        path.unlink()
 
 
 def stat_l1(sci: np.ndarray, mod: np.ndarray, sl: tuple) -> float:
@@ -166,6 +171,17 @@ def _build_spaxel_rows(
 
         local_spaxel_idx = spaxel_ID - row_start
 
+        # Hoisted out of the 1400-iteration loop below: these are indexed only by
+        # spaxel_ID, which is fixed for the whole loop, so re-indexing them on every
+        # spec_element was 1400x redundant array lookups per spaxel.
+        quad_spec = QUAD_SPEC[spaxel_ID]
+        lin_spec = LIN_SPEC[spaxel_ID]
+        lin_cross = LIN_CROSS[spaxel_ID]
+        ell_c1 = ELL_C1[spaxel_ID]
+        ell_b = ELL_B[spaxel_ID]
+        ell_c0 = ELL_C0[spaxel_ID]
+        ell_a = ELL_A[spaxel_ID]
+
         for spec_element in range(0, 1400):
             c0 = int(spec_element - 50) * oversample_factor
             if c0 < 0:
@@ -187,16 +203,16 @@ def _build_spaxel_rows(
             y = yv_sub_mono.T[0] - spec_element
             x = xv_sub_mono[0] - curve[spec_element]
 
-            spec_trace = QUAD_SPEC[spaxel_ID] * y**2 + LIN_SPEC[spaxel_ID] * y
-            cross_trace = LIN_CROSS[spaxel_ID] * x
+            spec_trace = quad_spec * y**2 + lin_spec * y
+            cross_trace = lin_cross * x
 
             xiii = (xv_sub_mono - curve[spec_element]).T - spec_trace
             yiii = (yv_sub_mono - spec_element) - cross_trace
 
             mask_footprint = (
                 np.sqrt(
-                    (yv_sub_mono - spec_element - ELL_C1[spaxel_ID]) ** 2 / ELL_B[spaxel_ID] ** 2
-                    + (xv_sub_mono - curve[spec_element] - ELL_C0[spaxel_ID]) ** 2 / ELL_A[spaxel_ID] ** 2
+                    (yv_sub_mono - spec_element - ell_c1) ** 2 / ell_b ** 2
+                    + (xv_sub_mono - curve[spec_element] - ell_c0) ** 2 / ell_a ** 2
                 )
                 < 1
             )
@@ -241,6 +257,77 @@ def _build_spaxel_rows(
             all_cols.append(colind[mv] * 2048 + rowind[mv])
 
     return np.concatenate(all_data), np.concatenate(all_rows), np.concatenate(all_cols)
+
+
+def extract_arc_vector_and_linespread(
+    arc_image: np.ndarray,
+    spaxels: list[int],
+    shifts_path: Path,
+    widths_path: Path,
+    output_dir: Path,
+    window: int = 50,
+) -> tuple[Path, Path]:
+    """Build arc_vector/linespread .npy inputs for calibrate_wavelength_arc from a preprocessed ARC exposure.
+
+    Uses the converged per-spaxel shift/width polynomials from run_make_parameter_matrix to locate
+    each spaxel's trace in the ARC image (a boxcar cut around the trace gives arc_vector) and to
+    evaluate the same analytic cross-dispersion profile used during fitting (gives linespread),
+    without rebuilding the full oversampled sparse model.
+    """
+    with shifts_path.open("r") as f:
+        shift_coeffs = json.load(f)
+    with widths_path.open("r") as f:
+        width_coeffs = json.load(f)
+
+    x0 = np.arange(0, 1400, 1)
+    offsets = np.arange(-50, 50)
+
+    arc_vector_rows = []
+    linespread_rows = []
+
+    for spaxel_ID in spaxels:
+        a0 = int(A0_PARAMS[spaxel_ID] + yoff)
+        b0 = int(B0_PARAMS[spaxel_ID] + xoff - 50)
+        off = 50
+        if b0 < 0:
+            off += b0
+            b0 = 0
+
+        curve = Polynomial([QUARTIC_LINEAR_PARAMS[spaxel_ID], Z_1ST[spaxel_ID], Z_2ND[spaxel_ID], 0, Z_4TH[spaxel_ID]])(
+            x0
+        ) + off
+
+        spax_key = str(spaxel_ID)
+        if spax_key in shift_coeffs:
+            latest_s = str(max(int(k) for k in shift_coeffs[spax_key].keys()))
+            curve = curve + np.poly1d(shift_coeffs[spax_key][latest_s])(x0)
+
+        widthVals = np.zeros_like(x0, dtype=float)
+        if spax_key in width_coeffs:
+            latest_w = str(max(int(k) for k in width_coeffs[spax_key].keys()))
+            widthVals = widthVals + np.poly1d(width_coeffs[spax_key][latest_w])(x0)
+
+        for spec_element in range(1400):
+            full_row = a0 + spec_element
+            full_col = int(round(b0 + curve[spec_element]))
+            lo = max(full_col - window, 0)
+            hi = min(full_col + window, arc_image.shape[1])
+            arc_vector_rows.append(np.nansum(arc_image[full_row, lo:hi]))
+
+            crossdis = 0.99 * pseudo_voigt(
+                np.abs(offsets), 0, 0.6 * widthVals[spec_element], 1.4 * widthVals[spec_element], 5.2, 0.6
+            ) + pseudo_voigt(np.abs(offsets), 0, 1.2, 0.1, -n_cross, 0.1, beta=0, l_off=10)
+            linespread_rows.append(psf_calculation(crossdis))
+
+    arc_vector = np.array(arc_vector_rows)
+    linespread = np.array(linespread_rows)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    arc_vector_path = output_dir / "arc_vector.npy"
+    linespread_path = output_dir / "linespread.npy"
+    np.save(arc_vector_path, arc_vector)
+    np.save(linespread_path, linespread)
+    return arc_vector_path, linespread_path
 
 
 @pipeline_task(task_run_name="neighbors-spaxel{spaxel}")
@@ -315,12 +402,37 @@ def makeShiftedMat(
 
 
 @pipeline_task(task_run_name="fit-spaxel{spaxel}-iter{iteration}-param{param:+.2f}")
-def fit(matrix, image, spectra, worker="main", spaxel=0, iteration=0, param=0.0):
+def fit(
+    matrix,
+    image,
+    spectra,
+    worker="main",
+    spaxel=0,
+    iteration=0,
+    param=0.0,
+    neighbor_mat=None,
+    neighbor_gram=None,
+):
+    """Fit a shifted model to the image.
+
+    If neighbor_mat/neighbor_gram are supplied, `matrix` is assumed to be the
+    *target-only* contribution and neighbor_gram = neighbor_mat.T @ neighbor_mat
+    has already been computed once for this spaxel (it is identical across every
+    param/iteration). AtA is then assembled from that cached Gram plus the much
+    cheaper cross/target terms, instead of recomputing the full (neighbor+target)
+    Gram matrix from scratch on every call.
+    """
     logger.info(f"[{worker}]   fitting model for spaxel={spaxel}, iteration={iteration}, param={param}...")
-    matrix = matrix.transpose()
+    target = matrix.transpose()
     spectra = sparse.csr_matrix(spectra).transpose()
 
-    shifted_image = matrix.dot(spectra).reshape((4096, 2048)).todense()
+    if neighbor_gram is not None:
+        neighborT = neighbor_mat.transpose()
+        full_matrix = neighborT + target
+    else:
+        full_matrix = target
+
+    shifted_image = full_matrix.dot(spectra).reshape((4096, 2048)).todense()
 
     flag = (shifted_image > 0.0) & np.isfinite(image)
     imagea = np.where(flag, image, 0.0)
@@ -328,11 +440,17 @@ def fit(matrix, image, spectra, worker="main", spaxel=0, iteration=0, param=0.0)
     fl = np.array(imagea.flatten().transpose().flat)
     assert np.all(np.isfinite(fl)), "b contains NaN or Inf!"
 
-    AtA = matrix.T.dot(matrix).tocsc()
-    Atb = matrix.T.dot(fl)
+    if neighbor_gram is not None:
+        cross = neighborT.T.dot(target)
+        AtA = (neighbor_gram + cross + cross.T + target.T.dot(target)).tocsc()
+        Atb = full_matrix.T.dot(fl)
+    else:
+        AtA = full_matrix.T.dot(full_matrix).tocsc()
+        Atb = full_matrix.T.dot(fl)
     # small regularization guards against singular columns (zero-contribution elements)
     AtA += 1e-10 * speye(AtA.shape[0], format="csc")
     x = spsolve(AtA, Atb)
+    matrix = full_matrix
 
     fitModel = matrix.dot(x).reshape((4096, 2048))
 
@@ -511,6 +629,9 @@ def _run_one_spaxel_all_iterations(
     # sequentially, so .submit() bought no real concurrency, only ~150 tracked
     # task runs' worth of API calls per spaxel against the shared Prefect server.
     neighbor_mat = makeShiftedMat_neighbors.fn(spax, oversample_factor=4)
+    # The neighbor-neighbor block of AtA never changes across params/iterations either —
+    # compute it once here instead of redoing it inside every fit() call.
+    neighbor_gram = neighbor_mat.dot(neighbor_mat.transpose())
     logger.info(f"[spaxel {spax}] neighbors done | peak RSS {_peak_memory_mb():.0f} MB")
 
     for iteration in range(iteration_max):
@@ -527,14 +648,21 @@ def _run_one_spaxel_all_iterations(
             target_mat = makeShiftedMat_target.fn(
                 spax, offset, width, oversample_factor=4, iteration=iteration
             )
-            combined = neighbor_mat + target_mat
-            del target_mat
 
-            model = fit.fn(combined, science_image, spectra, spaxel=spax, iteration=iteration, param=param)
+            model = fit.fn(
+                target_mat,
+                science_image,
+                spectra,
+                spaxel=spax,
+                iteration=iteration,
+                param=param,
+                neighbor_mat=neighbor_mat,
+                neighbor_gram=neighbor_gram,
+            )
             logger.info(
                 f"[spaxel {spax}] iter {iteration} param {param:+.2f} fit done | peak RSS {_peak_memory_mb():.0f} MB"
             )
-            del combined
+            del target_mat
 
             bin_stats_list.append(compute_bin_stats.fn(model, spax))
             del model
@@ -555,7 +683,7 @@ def make_parameter_matrix_old(
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
     global science_image, params
-    with fits.open("/global/homes/a/anousha/deep_skyflat_coadd.fits") as hdul:
+    with fits.open("/Users/anousha/Desktop/SNIFS/model/refs/deep_skyflat_coadd.fits") as hdul:
         science_image = hdul[0].data  # type:ignore
 
     spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else [8]
@@ -676,6 +804,7 @@ def run_make_parameter_matrix(
         iteration += 1
         _save_spaxel_jsons(spaxels_to_process, output_dir, iteration)
 
+    combine_spaxel_jsons(output_dir)
     shifts_path = output_dir / "tester_loop_shifts_editable.json"
     widths_path = output_dir / "tester_loop_widths_editable.json"
     image.header.set("shift_coeff_path", str(shifts_path))
