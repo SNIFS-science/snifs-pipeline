@@ -455,8 +455,7 @@ def build_target_matrix(
 
 
 if __name__ == "__main__":
-    t = build_neighbor_matrix(0,[0,0,0,0,0],[0,0,0,0,0],1)
-    del t
-    t = build_target_matrix(0,[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0])
+    t = build_neighbor_matrix(0, [0, 0, 0, 0, 0], [0, 0, 0, 0, 0], 1)
+    t = build_target_matrix(0, [0, 0, 0, 0, 0], [0, 0, 0, 0, 0], [0, 0, 0, 0, 0])
     del t
     
