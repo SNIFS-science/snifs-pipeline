@@ -341,7 +341,7 @@ def build_target_matrix(
             + ((P4 + O5) * (grid_view**4))
             + gpu_off
         ).astype(cp.float32)
-        print(curve.shape)
+
         width_polynomial = (
             W1 + (W2 * grid_view) + (W3 * (grid_view**2)) + (W4 * (grid_view**3)) + (W5 * (grid_view**4))
         ).astype(cp.float32)
@@ -452,3 +452,11 @@ def build_target_matrix(
         cp.get_default_memory_pool().free_all_blocks()
         cp.get_default_pinned_memory_pool().free_all_blocks()
         gc.collect()
+
+
+if __name__ == "__main__":
+    t = build_neighbor_matrix(0,[0,0,0,0,0],[0,0,0,0,0],1)
+    del t
+    t = build_target_matrix(0,[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0])
+    del t
+    
