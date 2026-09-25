@@ -36,7 +36,9 @@ export WORKER_WAIT_TIMEOUT=600
 
 
 
+
 OUTPUT_DIR="$SCRATCH/snifs-pipeline/output/make_matrix_GPU_hybrid_solver_test"
+
 mkdir -p "$OUTPUT_DIR"
 
 
@@ -100,11 +102,11 @@ nvidia-cuda-mps-control -d
 GROUP_NUM=9 #0-14
 FITS_PATH="/global/homes/a/anousha/deep_skyflat_coadd.fits" #ADDPATH
 
+
 #WARMUP FOR BUILDING CAHCE
 
 echo "Building CuPy kernel cache"
 uv run --no-sync python src/pipeline/tasks/processing/build_forward_group.py
-
 
 
 # ==============================================================================

@@ -103,17 +103,41 @@ IDX_DTYPE = np.int32
 
 import argparse
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--group", type=int, required=True, help="Specify which group to forward model (0-14).")
+if {"SNIFS_GROUP", "SNIFS_FITS_PATH", "SNIFS_OUTPUT_DIR"} <= os.environ.keys():
+    # Preloaded into a worker process (e.g. the GPU workers, which launch as
+    # a fresh `python -m dask worker ...` subprocess) -- sys.argv here
+    # belongs to dask, not us, so parsing it crashes the worker. main()
+    # forwards the same three values via env instead; use those.
+    args = argparse.Namespace(
+        group=int(os.environ["SNIFS_GROUP"]),
+        fits_path=os.environ["SNIFS_FITS_PATH"],
+        output_dir=os.environ["SNIFS_OUTPUT_DIR"],
+    )
+else:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--group", type=int, required=True, help="Specify which group to forward model (0-14).")
 
-parser.add_argument("--fits-path", type=str, required=True, help="The file path to the target FITS file.")
+    parser.add_argument("--fits-path", type=str, required=True, help="The file path to the target FITS file.")
 
-parser.add_argument("--output-dir", type=str, required=True, help="The file path to the save folder.")
+    parser.add_argument("--output-dir", type=str, required=True, help="The file path to the save folder.")
 
-args = parser.parse_args()
+    parser.add_argument(
+        "--spaxel",
+        type=int,
+        default=None,
+        help="Optional: process only this one spaxel within the group (instead of all 15), for a quick test.",
+    )
+
+    args = parser.parse_args()
+
+    # Forward to worker subprocesses so they read env instead of re-parsing argv.
+    os.environ["SNIFS_GROUP"] = str(args.group)
+    os.environ["SNIFS_FITS_PATH"] = args.fits_path
+    os.environ["SNIFS_OUTPUT_DIR"] = args.output_dir
 
 
 GROUP_MODELED = args.group
+SPAXEL_ONLY = getattr(args, "spaxel", None)  # None => original behavior, all 15 spaxels in the group
 
 print(args.output_dir)
 # TODO tasks 1, 2, and 3 the bin_saves, outdir and fits file path
@@ -665,11 +689,22 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
     logger = get_run_logger()
     from dask.distributed import Client
 
+    wait_timeout = _envint("WORKER_WAIT_TIMEOUT", 600)
+    poll_s = 15
+    n_want = n_cpu_workers + n_gpu_workers
     with Client(sched_address, timeout="120s") as client:
-        client.wait_for_workers(n_cpu_workers + n_gpu_workers, timeout=300)
+        waited = 0
+        while len(client.scheduler_info()["workers"]) < n_want and waited < wait_timeout:
+            n_have = len(client.scheduler_info()["workers"])
+            logger.info("waiting for workers: %d/%d registered (%ds/%ds)", n_have, n_want, waited, wait_timeout)
+            time.sleep(poll_s)
+            waited += poll_s
+        # Raises WorkerStartTimeoutError with a clear final count if still short.
+        client.wait_for_workers(n_want, timeout=1)
         info = client.scheduler_info()["workers"]
         gpu_addrs = [a for a, i in info.items() if "GPU" in (i.get("resources") or {})]
         cpu_addrs = [a for a, i in info.items() if "CPU" in (i.get("resources") or {})]
+        logger.info("workers ready: %d CPU, %d GPU", len(cpu_addrs), len(gpu_addrs))
 
     # Added history tracking arrays for the polynomial outputs
     spaxel_states = {
@@ -734,6 +769,8 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
             if group_id != GROUP_MODELED:
                 continue
             for spax_id in range(group_id * SPAXELS_PER_GROUP, (group_id + 1) * SPAXELS_PER_GROUP):
+                if SPAXEL_ONLY is not None and spax_id != SPAXEL_ONLY:
+                    continue
                 while len(inflight) >= MAX_SPAXELS_IN_FLIGHT:
                     retire_oldest()
 
@@ -853,6 +890,9 @@ def main():
         "OMP_NUM_THREADS": "1",
         "MKL_NUM_THREADS": "1",
         "OPENBLAS_NUM_THREADS": "1",
+        "SNIFS_GROUP": os.environ["SNIFS_GROUP"],
+        "SNIFS_FITS_PATH": os.environ["SNIFS_FITS_PATH"],
+        "SNIFS_OUTPUT_DIR": os.environ["SNIFS_OUTPUT_DIR"],
     }
     os.environ["PYTHONPATH"] = pythonpath
 
@@ -896,6 +936,7 @@ def main():
                 "GPU=1",
                 "--memory-limit",
                 GPU_MEM_LIMIT,
+                "--no-nanny",
                 "--preload",
                 module_name,
                 "--name",
