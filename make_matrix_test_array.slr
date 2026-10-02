@@ -4,17 +4,22 @@
 # Prefect server (no array, no master job, no separate worker jobs).
 #
 #SBATCH --job-name=matrix-test
-#SBATCH --time=02:00:00
+#SBATCH --time=00:30:00
 #SBATCH -A m112
 #SBATCH -C cpu
-#SBATCH -q shared
+#SBATCH -q debug
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=40
+#SBATCH --ntasks-per-node=75
 #SBATCH --cpus-per-task=2
 #SBATCH -o matrix_test_%j.out
 
 # Ensure uv (installed via `make install_uv` to ~/.local/bin) is on PATH.
 export PATH="$HOME/.local/bin:$PATH"
+
+# The work is single-threaded; stop BLAS/OpenMP from spawning idle threads.
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
 
 # $HOME is NERSC's "global homes" filesystem, which doesn't support the file
 # locking uv's cache needs — concurrent `uv run` calls there fail with
@@ -26,8 +31,9 @@ mkdir -p "$UV_CACHE_DIR"
 
 # and --ntasks-per-node together (in lockstep) if that ever changes.
 # TODO: first spaxel to process (e.g. 135 to start mid-way through the 225).
-GROUP_START=135
-NUM_SPAXELS=40   # must match --ntasks-per-node above
+GROUP_START=0
+NUM_SPAXELS=75   # must match --ntasks-per-node above
+ITERATION_MAX=4  # trial value; the default full run uses 10
 
 OUTPUT_DIR="$SCRATCH/snifs-pipeline/output/make_matrix_test"
 mkdir -p "$OUTPUT_DIR"
@@ -74,11 +80,13 @@ for i in $(seq 0 $((NUM_SPAXELS - 1))); do
     srun --exclusive -N1 -n1 -c"$SLURM_CPUS_PER_TASK" \
         uv run --no-sync python src/pipeline/tasks/processing/make_parameter_matrix.py \
         --spaxels "$SPAXEL" \
+        --iteration-max "$ITERATION_MAX" \
         --output-dir "$OUTPUT_DIR" &
 done
 
 wait
 echo "All ${NUM_SPAXELS} spaxels finished"
+sacct -j "$SLURM_JOB_ID" --format=JobID,Elapsed,MaxRSS,State | head -20
 
 # --- Shut down server ---
 kill $SERVER_PID

@@ -13,7 +13,7 @@ from PIL import Image as PILImage
 from scipy import sparse
 from scipy.interpolate import interp1d  # noqa: F401
 from scipy.sparse import eye as speye
-from scipy.sparse.linalg import spsolve
+from scipy.sparse.linalg import LinearOperator, cg, splu, spsolve
 
 from pipeline.common.fitting_math__utils import pseudo_voigt
 from pipeline.common.image import Image
@@ -412,8 +412,14 @@ def fit(
     param=0.0,
     neighbor_mat=None,
     neighbor_gram=None,
+    save_fits=True,
+    solver_cache=None,
 ):
     """Fit a shifted model to the image.
+
+    solver_cache: optional dict shared by the fits of one iteration. The first call factors its AtA with
+    splu and stores it; later calls (AtA differs only in the target spaxel's rows) solve with conjugate
+    gradient preconditioned by that factorization, falling back to spsolve if CG does not converge.
 
     If neighbor_mat/neighbor_gram are supplied, `matrix` is assumed to be the
     *target-only* contribution and neighbor_gram = neighbor_mat.T @ neighbor_mat
@@ -432,13 +438,15 @@ def fit(
     else:
         full_matrix = target
 
-    shifted_image = full_matrix.dot(spectra).reshape((4096, 2048)).todense()
-
-    flag = (shifted_image > 0.0) & np.isfinite(image)
-    imagea = np.where(flag, image, 0.0)
-
-    fl = np.array(imagea.flatten().transpose().flat)
-    assert np.all(np.isfinite(fl)), "b contains NaN or Inf!"
+    # Only pixels where the model is positive (and the data finite) contribute to b. Work from the
+    # sparse model's nonzero entries instead of densifying a 4096x2048 image.
+    shifted = full_matrix.dot(spectra).tocoo()
+    positive_idx = shifted.row[shifted.data > 0.0]
+    image_flat = np.asarray(image).ravel()
+    vals = image_flat[positive_idx]
+    finite = np.isfinite(vals)
+    fl = np.zeros(image_flat.shape[0])
+    fl[positive_idx[finite]] = vals[finite]
 
     if neighbor_gram is not None:
         cross = neighborT.T.dot(target)
@@ -449,17 +457,34 @@ def fit(
         Atb = full_matrix.T.dot(fl)
     # small regularization guards against singular columns (zero-contribution elements)
     AtA += 1e-10 * speye(AtA.shape[0], format="csc")
-    x = spsolve(AtA, Atb)
-    matrix = full_matrix
+    if solver_cache is None:
+        x = spsolve(AtA, Atb)
+    elif "lu" not in solver_cache:
+        solver_cache["lu"] = splu(AtA)
+        x = solver_cache["lu"].solve(Atb)
+    else:
+        lu = solver_cache["lu"]
+        x, info = cg(
+            AtA,
+            Atb,
+            x0=lu.solve(Atb),
+            rtol=1e-12,
+            M=LinearOperator(AtA.shape, matvec=lu.solve),
+            maxiter=200,
+        )
+        if info != 0:
+            logger.warning(f"[{worker}] preconditioned CG did not converge (info={info}); falling back to spsolve")
+            x = spsolve(AtA, Atb)
 
-    fitModel = matrix.dot(x).reshape((4096, 2048))
+    fitModel = full_matrix.dot(x).reshape((4096, 2048))
 
     if param == 0.0:
-        hdu = fits.PrimaryHDU(fitModel)
-        fits_filename = f"tester_spaxel_{spaxel}_iteration_{iteration}.fits"
-        hdulist = fits.HDUList([hdu])
-        hdulist.writeto(fits_filename, overwrite=True)
-        hdulist.close()
+        if save_fits:
+            hdu = fits.PrimaryHDU(fitModel)
+            fits_filename = f"tester_spaxel_{spaxel}_iteration_{iteration}.fits"
+            hdulist = fits.HDUList([hdu])
+            hdulist.writeto(fits_filename, overwrite=True)
+            hdulist.close()
 
         model_arr = np.asarray(fitModel)
         vmin, vmax = np.nanpercentile(model_arr, [1, 99])
@@ -614,6 +639,7 @@ def _run_one_spaxel_all_iterations(
     shift_offsets: list[float],
     width_multipliers: list[float],
     out: Path,
+    save_outputs: bool = False,
 ) -> None:
     """Run all iterations for a single spaxel sequentially.
 
@@ -640,8 +666,14 @@ def _run_one_spaxel_all_iterations(
         iter_params = shift_offsets if is_offset_iter else width_multipliers
         params = iter_params
 
-        bin_stats_list = []
-        for param in iter_params:
+        # Factor the param closest to zero first: its system is the best preconditioner for the rest.
+        # Results are stored by original index because l1_calculations expects them in param order.
+        # Only offset iterations reuse the factorization: a width change alters every entry of the target
+        # rows, so the zero-width LU is a poor preconditioner and CG hit its iteration limit there.
+        solver_cache: dict | None = {} if is_offset_iter else None
+        bin_stats_list = [None] * len(iter_params)
+        for param_idx in sorted(range(len(iter_params)), key=lambda i: abs(iter_params[i])):
+            param = iter_params[param_idx]
             offset = param if is_offset_iter else 0.0
             width = param if not is_offset_iter else 0.0
 
@@ -658,14 +690,17 @@ def _run_one_spaxel_all_iterations(
                 param=param,
                 neighbor_mat=neighbor_mat,
                 neighbor_gram=neighbor_gram,
+                save_fits=save_outputs,
+                solver_cache=solver_cache,
             )
             logger.info(
                 f"[spaxel {spax}] iter {iteration} param {param:+.2f} fit done | peak RSS {_peak_memory_mb():.0f} MB"
             )
             del target_mat
 
-            bin_stats_list.append(compute_bin_stats.fn(model, spax))
+            bin_stats_list[param_idx] = compute_bin_stats.fn(model, spax)
             del model
+        del solver_cache
 
         l1_calculations.fn([spax], bin_stats_list, len(iter_params), iteration, is_offset_iter)
         _save_spaxel_jsons([spax], out, iteration + 1)
@@ -678,12 +713,13 @@ def make_parameter_matrix_old(
     iteration_max: int = 10,
     output_dir: Path | None = None,
     fresh: bool = False,
+    save_outputs: bool = False,
 ):
     shift_offsets = [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2]
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
     global science_image, params
-    with fits.open("/Users/anousha/Desktop/SNIFS/model/refs/deep_skyflat_coadd.fits") as hdul:
+    with fits.open("/global/homes/a/anousha/deep_skyflat_coadd.fits") as hdul:
         science_image = hdul[0].data  # type:ignore
 
     spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else [8]
@@ -697,7 +733,7 @@ def make_parameter_matrix_old(
 
     for spax in spaxels_to_process:
         logger.info(f"Starting spaxel {spax} | peak RSS {_peak_memory_mb():.0f} MB")
-        _run_one_spaxel_all_iterations(spax, iteration_max, shift_offsets, width_multipliers, out)
+        _run_one_spaxel_all_iterations(spax, iteration_max, shift_offsets, width_multipliers, out, save_outputs)
         logger.info(f"Finished spaxel {spax} | peak RSS {_peak_memory_mb():.0f} MB")
         create_markdown_artifact(
             markdown=(
@@ -708,7 +744,8 @@ def make_parameter_matrix_old(
             key=f"wavelength-cal-spaxel-{spax}",
             description=f"Shift/width polynomial coefficients for spaxel {spax}",
         )
-        _final_fit_and_animate(spax, iteration_max, out, cleanup_fits=True)
+        if save_outputs:
+            _final_fit_and_animate(spax, iteration_max, out, cleanup_fits=True)
 
 
 def _run_one_iteration_parallel(
@@ -834,6 +871,13 @@ if __name__ == "__main__":
         help="Ignore any existing tester_loop_shifts/widths_spaxel_*.json for these spaxels "
         "and start the shift/width correction from zero instead of resuming.",
     )
+    parser.add_argument(
+        "--save-outputs",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Off by default. When on (--save-outputs), write the per-iteration FITS files, run the final fit + "
+        "convergence animation, and clean up the FITS afterwards. Shift/width JSONs are always written.",
+    )
     args = parser.parse_args()
 
     if args.spaxels is None:
@@ -845,7 +889,13 @@ if __name__ == "__main__":
         spaxels = [int(s) for s in args.spaxels.split(",")]
 
     output_dir = Path(args.output_dir) if args.output_dir else Path.cwd()
-    make_parameter_matrix_old(spaxels, iteration_max=args.iteration_max, output_dir=output_dir, fresh=args.fresh)
+    make_parameter_matrix_old(
+        spaxels,
+        iteration_max=args.iteration_max,
+        output_dir=output_dir,
+        fresh=args.fresh,
+        save_outputs=args.save_outputs,
+    )
 
     combine_spaxel_jsons(output_dir)
     logger.info(f"Combined JSONs written to {output_dir}")
