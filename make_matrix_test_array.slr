@@ -35,7 +35,10 @@ GROUP_START=0
 NUM_SPAXELS=75   # must match --ntasks-per-node above
 ITERATION_MAX=4  # trial value; the default full run uses 10
 
-OUTPUT_DIR="$SCRATCH/snifs-pipeline/output/make_matrix_test"
+# Override per job to run on different files, e.g.:
+#   SCIENCE_IMAGE=/path/to/other.fits OUTPUT_DIR=$SCRATCH/out/other sbatch make_matrix_test_array.slr
+SCIENCE_IMAGE="${SCIENCE_IMAGE:-/global/homes/a/anousha/deep_skyflat_coadd.fits}"
+OUTPUT_DIR="${OUTPUT_DIR:-$SCRATCH/snifs-pipeline/output/make_matrix_test}"
 mkdir -p "$OUTPUT_DIR"
 
 cd $HOME/snifs-pipeline   # TODO: match your actual repo checkout path
@@ -81,6 +84,7 @@ for i in $(seq 0 $((NUM_SPAXELS - 1))); do
         uv run --no-sync python src/pipeline/tasks/processing/make_parameter_matrix.py \
         --spaxels "$SPAXEL" \
         --iteration-max "$ITERATION_MAX" \
+        --science-image "$SCIENCE_IMAGE" \
         --output-dir "$OUTPUT_DIR" &
 done
 

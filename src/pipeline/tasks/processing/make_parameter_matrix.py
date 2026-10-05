@@ -714,12 +714,13 @@ def make_parameter_matrix_old(
     output_dir: Path | None = None,
     fresh: bool = False,
     save_outputs: bool = False,
+    science_image_path: Path | str = "/global/homes/a/anousha/deep_skyflat_coadd.fits",
 ):
     shift_offsets = [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2]
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
     global science_image, params
-    with fits.open("/global/homes/a/anousha/deep_skyflat_coadd.fits") as hdul:
+    with fits.open(science_image_path) as hdul:
         science_image = hdul[0].data  # type:ignore
 
     spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else [8]
@@ -862,6 +863,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--iteration-max", type=int, default=4)
     parser.add_argument(
+        "--science-image",
+        type=str,
+        default="/global/homes/a/anousha/deep_skyflat_coadd.fits",
+        help="Path to the science image FITS file to fit",
+    )
+    parser.add_argument(
         "--output-dir", type=str, default=None, help="Directory to write per-spaxel JSON files (default: cwd)"
     )
     parser.add_argument(
@@ -895,6 +902,7 @@ if __name__ == "__main__":
         output_dir=output_dir,
         fresh=args.fresh,
         save_outputs=args.save_outputs,
+        science_image_path=args.science_image,
     )
 
     combine_spaxel_jsons(output_dir)
