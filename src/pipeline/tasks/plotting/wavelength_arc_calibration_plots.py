@@ -11,7 +11,7 @@ from pipeline.common import Image, get_logger, pipeline_task
 from pipeline.common.model_params import A0_PARAMS, A1_PARAMS, B0_PARAMS, B1_PARAMS
 from pipeline.common.plotting_utils import get_all_peaks
 from pipeline.resolver.resolver import PUBLIC_PATH_MAP, get_run_id
-from pipeline.tasks.plotting.plots import plot_standalone
+from pipeline.tasks.plotting.plots import CMAP_DATA, CMAP_DIFF, add_colorbar, plot_standalone
 
 ALL_PEAKS = get_all_peaks()
 
@@ -329,9 +329,7 @@ def animate_gl_convergence(
 
     g_scatter = ax_g.scatter([], [], color="tab:blue", marker="o", s=30, label="gaussian")
     l_scatter = ax_l.scatter([], [], color="tab:red", marker="s", s=30, label="lorentzian")
-    ax_g.legend(
-        handles=[g_scatter, l_scatter], labels=["gaussian", "lorentzian"], loc="upper left", fontsize=7
-    )
+    ax_g.legend(handles=[g_scatter, l_scatter], labels=["gaussian", "lorentzian"], loc="upper left", fontsize=7)
 
     fig.suptitle(f"Gauss/Lorentz evolution — key {outer_key}", fontsize=11)
 
@@ -339,9 +337,7 @@ def animate_gl_convergence(
     def update(frame):
         im_handle.set_data(diff_cutouts[frame])
         vsum_line.set_ydata(diff_vsums[frame])
-        img_title.set_text(
-            image_labels[frame] if image_labels else f"iter {frame_iterations[frame]}\nscience − model"
-        )
+        img_title.set_text(image_labels[frame] if image_labels else f"iter {frame_iterations[frame]}\nscience − model")
         for i, ln in enumerate(line_handles):
             if i <= frame:
                 ln.set_alpha(fade_factor ** (frame - i))
@@ -617,3 +613,94 @@ if __name__ == "__main__":
         plt.legend()
         plt.ylabel("Percentage")
         plt.show()
+
+
+def residual_stats(
+    science_image: np.ndarray, model: np.ndarray, spaxel: int, valid_mask: np.ndarray | None = None
+) -> dict[str, float]:
+    """|science - model| / peak science of the same spectral row, over the spaxel's whole +-50 column crop."""
+    a0, a1 = int(A0_PARAMS[spaxel]), int(A1_PARAMS[spaxel]) + 1
+    b0, b1 = max(int(B0_PARAMS[spaxel]) - 50, 0), int(B1_PARAMS[spaxel]) + 51
+    science = np.asarray(science_image)[a0:a1, b0:b1]
+    frac = np.abs(science - np.asarray(model)[a0:a1, b0:b1]) / np.nanmax(science, axis=1, keepdims=True)
+    if valid_mask is not None:
+        frac = frac[np.asarray(valid_mask)[a0:a1, b0:b1]]
+    return {
+        "mean": float(np.nanmean(frac)),
+        "median": float(np.nanmedian(frac)),
+        "p90": float(np.nanpercentile(frac, 90)),
+        "under_1pct": float(np.nanmean(frac < 0.01)),
+    }
+
+
+def plot_fit_difference(
+    science_image: np.ndarray,
+    initial_model: np.ndarray,
+    final_model: np.ndarray,
+    spaxel: int,
+    output_path: Path,
+    pad: int = 10,
+) -> Path:
+    """Plot the initial and best-fit models of one spaxel, and the difference between them.
+
+    Columns: initial, best fit, difference (best fit - initial).
+    Top row: the model (difference column: model change). Bottom row: science - model for the first two columns;
+    in the difference column, |science - initial| - |science - best fit|, so positive means the fit improved.
+    Images are cropped to the spaxel's footprint; the first two columns in each row share a colour scale.
+    """
+    a0, a1 = int(A0_PARAMS[spaxel]), int(A1_PARAMS[spaxel]) + 1
+    b0, b1 = max(int(B0_PARAMS[spaxel]) - 50, 0), int(B1_PARAMS[spaxel]) + 51
+    rows, cols = slice(max(a0 - pad, 0), a1 + pad), slice(b0, b1)
+    extent = (cols.start, cols.stop, rows.start, rows.stop)
+
+    science = np.asarray(science_image)[rows, cols]
+    initial = np.asarray(initial_model)[rows, cols]
+    final = np.asarray(final_model)[rows, cols]
+    resid_initial, resid_final = science - initial, science - final
+    model_change = final - initial
+    improvement = np.abs(resid_initial) - np.abs(resid_final)
+
+    data_lo, data_hi = np.nanpercentile(np.stack([initial, final]), [1, 99])
+    resid_lim = float(max(np.nanpercentile(np.abs(resid_initial), 99), np.nanpercentile(np.abs(resid_final), 99)))
+    change_lim = max(float(np.nanpercentile(np.abs(model_change), 99.5)), 1e-9)
+    improve_lim = max(float(np.nanpercentile(np.abs(improvement), 99.5)), 1e-9)
+
+    panels = [
+        # (row, col, data, label, cmap, vmin, vmax)
+        (0, 0, initial, "Model, initial", CMAP_DATA, data_lo, data_hi),
+        (0, 1, final, "Model, best fit", CMAP_DATA, data_lo, data_hi),
+        (0, 2, model_change, "Model diff (best fit - initial)", CMAP_DIFF, -change_lim, change_lim),
+        (1, 0, resid_initial, "Science - initial", CMAP_DIFF, -resid_lim, resid_lim),
+        (1, 1, resid_final, "Science - best fit", CMAP_DIFF, -resid_lim, resid_lim),
+        (1, 2, improvement, "Residual improvement", CMAP_DIFF, -improve_lim, improve_lim),
+    ]
+    fig, axes = plt.subplots(2, 3, figsize=(13.5, 12), gridspec_kw={"hspace": 0.2, "wspace": 0.2})
+    stats = {
+        name: residual_stats(science_image, model, spaxel)
+        for name, model in (("initial", initial_model), ("best fit", final_model))
+    }
+    summary = "; ".join(
+        f"{name}: mean {s['mean']:.1%}, median {s['median']:.1%}, <1% {s['under_1pct']:.0%}" for name, s in stats.items()
+    )
+    axes[0, 0].annotate(
+        f"Spaxel {spaxel} - initial vs best fit (columns {cols.start}-{cols.stop}, rows {rows.start}-{rows.stop})\n"
+        f"|resid|/row peak, {summary}",
+        xy=(0, 1.01),
+        xycoords="axes fraction",
+        ha="left",
+        va="bottom",
+        fontsize=10,
+    )
+    for row, col, data, label, cmap, vmin, vmax in panels:
+        ax = axes[row, col]
+        im = ax.imshow(
+            data, origin="lower", interpolation="none", aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax, extent=extent
+        )
+        add_colorbar(f"{label} (mean={np.nanmean(data):.2f}, std{np.nanstd(data):.2f})", fig, ax, im)
+        ax.set_xticks([])
+        ax.tick_params(axis="y", labelsize=6)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return output_path

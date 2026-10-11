@@ -32,18 +32,17 @@ def make_flux_array(linespread_path: Path, arc_vector_file: Path) -> np.ndarray:
     Returns:
         np.ndarray: The flux array.
     """  # noqa: D205
-    big_arr = []
-    # TODO: should check that the loaded file is the size we expect it to be otherwise will have problems
-    linespread_data = np.load(linespread_path)  # load_images_from_file(linespread_path)[0].data
-    print("linespread shape", linespread_data.shape)
-    spectra = linespread_data.reshape(NUMBER_OF_SPAXELS, -1)
-    print("spectra shape", spectra.shape)
+    linespread_data = np.load(linespread_path)  # (n_spaxels * 1400, 100)
+    spectrum_data = np.load(arc_vector_file)  # (n_spaxels * 1400,)
+    n_spaxels = len(spectrum_data) // 1400
+    if linespread_data.shape[0] != n_spaxels * 1400:
+        raise ValueError(f"linespread has {linespread_data.shape[0]} rows but arc vector implies {n_spaxels * 1400}")
 
-    spectrum_data = np.load(arc_vector_file)  # load_images_from_file(arc_vector_file)[0].data
-    for i in range(0, NUMBER_OF_SPAXELS):
-        avg_cross = np.nanmean(spectrum_data[1400 * i : 1400 * i + 1], axis=0)
-        spectrum = np.convolve(avg_cross, spectra[i])
-        big_arr.append(spectrum)
+    big_arr = []
+    for i in range(n_spaxels):
+        arc = spectrum_data[1400 * i : 1400 * (i + 1)]
+        kernel = np.nanmean(linespread_data[1400 * i : 1400 * (i + 1)], axis=0)
+        big_arr.append(np.convolve(arc, kernel / kernel.sum(), mode="full"))
     return np.array(big_arr)
 
 
@@ -224,52 +223,48 @@ def recal_spec(spectrum, peak_guesses, corresponding_wavelengths) -> tuple[np.nd
     return wavelengths_3, p_3, residuals**2
 
 
-def calibrate_wavelength_arc(arcVectorPath, lineSpreadPath):  # (arc: PreprocessSummary) -> Image:
-    """Args:
-        arc: PreprocessSummary object containing the arc file to be calibrated.
+def calibrate_wavelength_arc(
+    arcVectorPath, lineSpreadPath, spaxels: list[int] | None = None, output_dir: Path | None = None
+):
+    """Fit a cubic pixel->wavelength solution for each spaxel in the arc vector.
+
+    Args:
+        arcVectorPath: .npy of the concatenated per-spaxel arc vectors (1400 per spaxel).
+        lineSpreadPath: .npy of the matching per-row line-spread kernels.
+        spaxels: spaxel ids, in the order they were written to the arc vector (default 0..n-1).
+        output_dir: where to write the per-spaxel parameter JSONs (default settings.output_path).
 
     Returns:
-        np.ndarray: The calibrated wavelength parameters.
-    """  # noqa: D205
+        The rectified-spectrum plot image.
+    """
     logger = get_logger()
-    # ogger.info(f"Starting wavelength calibration for arc file: {arc.output_path}")
-
-    # get what the data actually look like (uncalibrated)
     flux_array = make_flux_array(lineSpreadPath, arcVectorPath)
+    spaxels = list(spaxels) if spaxels is not None else list(range(len(flux_array)))
+    if len(spaxels) != len(flux_array):
+        raise ValueError(f"{len(spaxels)} spaxel ids given but the arc vector holds {len(flux_array)} spaxels")
+    output_dir = output_dir if output_dir is not None else settings.output_path
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     wavelength_list = []
-    params = []
     residuals = []
-
-    for i in range(NUMBER_OF_SPAXELS):
-        spec = flux_array[i]
-        waves, ps, res = cal_spec(spec, PEAKS_DICT)
-        wavelength_list.append(waves)
-        params.append(ps)
-        # residuals.extend(res)
-        logger.info(f"early RMS: {np.sqrt(np.nanmean(res))}")
-        logger.info("beginning refined fitting")
-        residuals = []
+    for idx, spaxel in enumerate(spaxels):
+        spec = flux_array[idx]
+        waves, _, res = cal_spec(spec, PEAKS_DICT)
+        logger.info(f"spaxel {spaxel} early RMS: {np.sqrt(np.nanmean(res))}")
         # figure out where we think the peaks are based on the previous fit, then refine them
-        closest_indices = [find_closest_index(wavelength_list[i], p) for p in ALL_PEAKS]
+        closest_indices = [find_closest_index(waves, p) for p in ALL_PEAKS]
         waves, ps, res = recal_spec(spec, closest_indices, list(ALL_PEAKS))
-        wavelength_list[i] = waves
-        params[i] = ps
+        wavelength_list.append(waves)
         residuals.extend(res)
-        logger.info(f"spaxel {i} done")
+        logger.info(f"spaxel {spaxel} done")
 
-        output_path = settings.output_path / f"wavelength_calibration_parameters_spaxel_{i}.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        spaxel_json = {"coefficient_order": [3, 2, 1, 0], str(i): params[i].tolist()}
+        output_path = output_dir / f"wavelength_calibration_parameters_spaxel_{spaxel}.json"
         with output_path.open("w") as f:
-            json.dump(spaxel_json, f, indent=2)
-        logger.info(f"Saved wavelength calibration parameters for spaxel {i} to {output_path}")
+            json.dump({"coefficient_order": [3, 2, 1, 0], str(spaxel): ps.tolist()}, f, indent=2)
+        logger.info(f"Saved wavelength calibration parameters for spaxel {spaxel} to {output_path}")
 
-    # plot_params(params)
-    logger.info("late RMS: ", np.sqrt(np.nanmean(residuals)))
-    image = plot_spectrum(np.array(wavelength_list), flux_array)
-    # TODO: decide what we want to save and/or return
-    # np.save(f"{name}fit_wavelength_cal", big_wave)
-    return image
+    logger.info(f"late RMS: {np.sqrt(np.nanmean(residuals))}")
+    return plot_spectrum(np.array(wavelength_list), flux_array)
 
 
 """

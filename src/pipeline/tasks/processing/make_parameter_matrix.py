@@ -36,7 +36,11 @@ from pipeline.common.model_params import (
     Z_4TH,
 )
 from pipeline.common.prefect_utils import create_image_artifact, create_markdown_artifact, pipeline_flow, pipeline_task
-from pipeline.tasks.plotting.wavelength_arc_calibration_plots import animate_poly_convergence
+from pipeline.tasks.plotting.wavelength_arc_calibration_plots import (
+    animate_poly_convergence,
+    plot_fit_difference,
+    residual_stats,
+)
 
 logger = get_logger()
 superStart = time.time()
@@ -119,14 +123,14 @@ def _build_spaxel_rows(
     offset_per_id: dict[int, float],
     width_per_id: dict[int, float],
     oversample_factor: int,
-    use_total_coeffs_for: int | None,
+    use_total_coeffs_for: int | set[int] | None,
     gauss_width_scale: float = 0.6,
     lorentz_width_scale: float = 1.1,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build COO triplets for a subset of spaxel rows.
 
     offset_per_id / width_per_id: scalar offset/width adjustment per spaxel_ID.
-    use_total_coeffs_for: if not None, apply total_coeffs/total_widths lookup for that spaxel_ID.
+    use_total_coeffs_for: spaxel_ID (or set of IDs) that get the total_coeffs/total_widths lookup applied.
     gauss_width_scale / lorentz_width_scale: multipliers on widthVals for the spectral-direction
         Gaussian and Lorentzian widths (defaults 0.6/1.3 preserve original behavior).
     Returns (data, rows, cols) ready for sparse.csr_matrix construction.
@@ -134,6 +138,7 @@ def _build_spaxel_rows(
     all_data: list = []
     all_rows: list = []
     all_cols: list = []
+    use_total = {use_total_coeffs_for} if isinstance(use_total_coeffs_for, int) else set(use_total_coeffs_for or ())
 
     for spaxel_ID in spaxel_IDs:
         a0 = int(A0_PARAMS[spaxel_ID] + yoff)
@@ -158,14 +163,14 @@ def _build_spaxel_rows(
         adjustmentP = Polynomial([offset_per_id.get(spaxel_ID, 0.0)])
         curve = p(x0) + adjustmentP(x0) + off
 
-        if use_total_coeffs_for == spaxel_ID:
+        if spaxel_ID in use_total:
             latest_s = str(max(int(k) for k in total_coeffs[str(spaxel_ID)].keys()))
             curve = curve + np.poly1d(total_coeffs[str(spaxel_ID)][latest_s])(x0)
 
         widthAdjustmentP = Polynomial([width_per_id.get(spaxel_ID, 0.0)])
         widthVals = widthAdjustmentP(x0)
 
-        if use_total_coeffs_for == spaxel_ID:
+        if spaxel_ID in use_total:
             latest_w = str(max(int(k) for k in total_widths[str(spaxel_ID)].keys()))
             widthVals += np.poly1d(total_widths[str(spaxel_ID)][latest_w])(x0)
 
@@ -211,8 +216,8 @@ def _build_spaxel_rows(
 
             mask_footprint = (
                 np.sqrt(
-                    (yv_sub_mono - spec_element - ell_c1) ** 2 / ell_b ** 2
-                    + (xv_sub_mono - curve[spec_element] - ell_c0) ** 2 / ell_a ** 2
+                    (yv_sub_mono - spec_element - ell_c1) ** 2 / ell_b**2
+                    + (xv_sub_mono - curve[spec_element] - ell_c0) ** 2 / ell_a**2
                 )
                 < 1
             )
@@ -293,9 +298,10 @@ def extract_arc_vector_and_linespread(
             off += b0
             b0 = 0
 
-        curve = Polynomial([QUARTIC_LINEAR_PARAMS[spaxel_ID], Z_1ST[spaxel_ID], Z_2ND[spaxel_ID], 0, Z_4TH[spaxel_ID]])(
-            x0
-        ) + off
+        curve = (
+            Polynomial([QUARTIC_LINEAR_PARAMS[spaxel_ID], Z_1ST[spaxel_ID], Z_2ND[spaxel_ID], 0, Z_4TH[spaxel_ID]])(x0)
+            + off
+        )
 
         spax_key = str(spaxel_ID)
         if spax_key in shift_coeffs:
@@ -334,7 +340,8 @@ def extract_arc_vector_and_linespread(
 def makeShiftedMat_neighbors(spaxel: int, oversample_factor: int = 1, iteration: int = 0):
     """Build matrix rows for the 14 neighbors of spaxel (no offset/width perturbation).
 
-    This result is identical for every param value in an iteration, so compute it once.
+    Neighbours use their own fitted shift/width polynomials (unfitted default: constant width 1.0); a zero
+    width makes pseudo_voigt degenerate. Identical for every param value, so compute it once.
     """
     row_start = 15 * (spaxel // 15)
     row_end = 15 * (spaxel // 15 + 1)
@@ -346,7 +353,7 @@ def makeShiftedMat_neighbors(spaxel: int, oversample_factor: int = 1, iteration:
         offset_per_id={},
         width_per_id={},
         oversample_factor=oversample_factor,
-        use_total_coeffs_for=None,
+        use_total_coeffs_for=set(neighbor_ids),
     )
     return sparse.csr_matrix(
         (data, (rows, cols)),
@@ -393,7 +400,7 @@ def makeShiftedMat(
         offset_per_id={sid: float(offsets[sid]) for sid in range(row_start, row_end)},
         width_per_id={sid: float(widths[sid]) for sid in range(row_start, row_end)},
         oversample_factor=oversample_factor,
-        use_total_coeffs_for=spaxel,
+        use_total_coeffs_for=set(range(row_start, row_end)),
     )
     return sparse.csr_matrix(
         (data, (rows, cols)),
@@ -507,10 +514,6 @@ def fit(
         )
 
     return fitModel
-
-
-# TODO: CHANGE OVERSAMPLE FACTOR BACK TO 4
-
 
 def fit_best_shift(shifts, values, degree=4):
     """Fit a degree-N polynomial and return the shift at the minimum."""
@@ -640,6 +643,7 @@ def _run_one_spaxel_all_iterations(
     width_multipliers: list[float],
     out: Path,
     save_outputs: bool = False,
+    oversample_factor: int = 4,
 ) -> None:
     """Run all iterations for a single spaxel sequentially.
 
@@ -654,7 +658,7 @@ def _run_one_spaxel_all_iterations(
     # .submit()/.result(): everything in this function already runs strictly
     # sequentially, so .submit() bought no real concurrency, only ~150 tracked
     # task runs' worth of API calls per spaxel against the shared Prefect server.
-    neighbor_mat = makeShiftedMat_neighbors.fn(spax, oversample_factor=4)
+    neighbor_mat = makeShiftedMat_neighbors.fn(spax, oversample_factor=oversample_factor)
     # The neighbor-neighbor block of AtA never changes across params/iterations either —
     # compute it once here instead of redoing it inside every fit() call.
     neighbor_gram = neighbor_mat.dot(neighbor_mat.transpose())
@@ -678,7 +682,7 @@ def _run_one_spaxel_all_iterations(
             width = param if not is_offset_iter else 0.0
 
             target_mat = makeShiftedMat_target.fn(
-                spax, offset, width, oversample_factor=4, iteration=iteration
+                spax, offset, width, oversample_factor=oversample_factor, iteration=iteration
             )
 
             model = fit.fn(
@@ -715,13 +719,18 @@ def make_parameter_matrix_old(
     fresh: bool = False,
     save_outputs: bool = False,
     science_image_path: Path | str = "/global/homes/a/anousha/deep_skyflat_coadd.fits",
+    oversample_factor: int = 4,
+    science_array: np.ndarray | None = None,
 ):
     shift_offsets = [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2]
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
     global science_image, params
-    with fits.open(science_image_path) as hdul:
-        science_image = hdul[0].data  # type:ignore
+    if science_array is not None:
+        science_image = science_array
+    else:
+        with fits.open(science_image_path) as hdul:
+            science_image = hdul[0].data  # type:ignore
 
     spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else [8]
     out = output_dir if output_dir is not None else Path.cwd()
@@ -734,7 +743,9 @@ def make_parameter_matrix_old(
 
     for spax in spaxels_to_process:
         logger.info(f"Starting spaxel {spax} | peak RSS {_peak_memory_mb():.0f} MB")
-        _run_one_spaxel_all_iterations(spax, iteration_max, shift_offsets, width_multipliers, out, save_outputs)
+        _run_one_spaxel_all_iterations(
+            spax, iteration_max, shift_offsets, width_multipliers, out, save_outputs, oversample_factor
+        )
         logger.info(f"Finished spaxel {spax} | peak RSS {_peak_memory_mb():.0f} MB")
         create_markdown_artifact(
             markdown=(
@@ -745,8 +756,10 @@ def make_parameter_matrix_old(
             key=f"wavelength-cal-spaxel-{spax}",
             description=f"Shift/width polynomial coefficients for spaxel {spax}",
         )
+        diff_path = _plot_initial_vs_best_fit(spax, out, oversample_factor)
+        logger.info(f"Saved initial vs best-fit difference plot to {diff_path}")
         if save_outputs:
-            _final_fit_and_animate(spax, iteration_max, out, cleanup_fits=True)
+            _final_fit_and_animate(spax, iteration_max, out, cleanup_fits=True, oversample_factor=oversample_factor)
 
 
 def _run_one_iteration_parallel(
@@ -771,10 +784,181 @@ def _run_one_iteration_parallel(
     return [f.result() for f in bin_stats_futures]
 
 
-def _final_fit_and_animate(spaxel: int, iteration_max: int, output_dir: Path, cleanup_fits: bool) -> None:
+def _fit_initial_and_best(spaxel: int, oversample_factor: int = 4) -> tuple[np.ndarray, np.ndarray]:
+    """Fit the spaxel with no shift/width correction and with the converged ones; return both models."""
+    spectra = np.concatenate(spec[15 * (spaxel // 15) : 15 * (spaxel // 15 + 1)])
+    zeros = np.zeros(225)
+
+    def _fit() -> np.ndarray:
+        mat = _raw(makeShiftedMat)(spaxel, zeros, zeros, oversample_factor=oversample_factor)
+        # param=1.0 keeps fit() from writing its per-iteration FITS/artifacts (those are tied to param == 0.0)
+        return np.asarray(_raw(fit)(mat, science_image, spectra, spaxel=spaxel, param=1.0, save_fits=False))
+
+    group = [str(s) for s in range(15 * (spaxel // 15), 15 * (spaxel // 15 + 1))]
+    best = {k: (total_coeffs[k], total_widths[k]) for k in group}
+    try:
+        for k in group:
+            total_coeffs[k] = {"0": [0.0, 0.0, 0.0, 0.0, 0.0]}
+            total_widths[k] = {"0": [0.0, 0.0, 0.0, 0.0, 1.0]}
+        initial_model = _fit()
+    finally:
+        for k in group:
+            total_coeffs[k], total_widths[k] = best[k]
+    return initial_model, _fit()
+
+
+def _plot_initial_vs_best_fit(spaxel: int, output_dir: Path, oversample_factor: int = 4) -> Path:
+    initial_model, final_model = _fit_initial_and_best(spaxel, oversample_factor)
+    return plot_fit_difference(
+        science_image, initial_model, final_model, spaxel, output_dir / f"tester_fit_difference_spaxel_{spaxel}.png"
+    )
+
+
+def _raw(task):
+    """The undecorated function (a Prefect task has .fn; with Prefect disabled the function is returned as is)."""
+    return getattr(task, "fn", task)
+
+
+def _spaxel_column_bounds(spaxel: int) -> tuple[int, int]:
+    """Columns owned by a spaxel: halfway to its neighbours in the group (mirrored at the group edge)."""
+    group_start = 15 * (spaxel // 15)
+    centers = [(B0_PARAMS[s] + B1_PARAMS[s]) / 2 for s in range(group_start, group_start + 15)]
+    i = spaxel - group_start
+    left = (centers[i] - centers[i - 1]) / 2 if i > 0 else (centers[1] - centers[0]) / 2
+    right = (centers[i + 1] - centers[i]) / 2 if i < 14 else (centers[14] - centers[13]) / 2
+    return int(round(centers[i] - left)), int(round(centers[i] + right))
+
+
+def _group_bin_stats(model: np.ndarray, group_start: int) -> np.ndarray:
+    """Per-bin L1 residual for every spaxel of the group, each over its own columns: shape (15, n_bins)."""
+    edges = heights.astype(int)
+    stats = np.full((15, n_bins), np.nan)
+    for i in range(15):
+        c0, c1 = _spaxel_column_bounds(group_start + i)
+        rowsum = np.nansum(np.abs(np.asarray(science_image)[:, c0:c1] - model[:, c0:c1]), axis=1)
+        cumulative = np.concatenate([[0.0], np.cumsum(rowsum)])
+        stats[i] = cumulative[edges[1:]] - cumulative[edges[:-1]]
+    return stats
+
+
+def _init_group_worker(image: np.ndarray) -> None:
+    global science_image
+    science_image = image
+
+
+def _group_scan_task(
+    group_start: int, param: float, is_offset_iter: bool, oversample_factor: int, coeffs: dict, widths: dict
+) -> np.ndarray:
+    """Fit the whole group with `param` applied to every spaxel at once; return the per-spaxel bin stats."""
+    group = range(group_start, group_start + 15)
+    for sid in group:
+        total_coeffs[str(sid)] = coeffs[str(sid)]
+        total_widths[str(sid)] = widths[str(sid)]
+    offsets, width_adjust = np.zeros(225), np.zeros(225)
+    (offsets if is_offset_iter else width_adjust)[group_start : group_start + 15] = param
+    matrix = _raw(makeShiftedMat)(group_start, offsets, width_adjust, oversample_factor=oversample_factor)
+    spectra = np.concatenate(spec[group_start : group_start + 15])
+    # param=1.0 keeps fit() from writing its per-iteration FITS/artifacts (tied to param == 0.0)
+    model = np.asarray(_raw(fit)(matrix, science_image, spectra, spaxel=group_start, param=1.0, save_fits=False))
+    return _group_bin_stats(model, group_start)
+
+
+def _plot_group_fit_difference(group_start: int, output_dir: Path, oversample_factor: int) -> list[Path]:
+    """One initial and one best-fit model for the whole group, plotted for each of its spaxels."""
+    initial_model, final_model = _fit_initial_and_best(group_start, oversample_factor)
+    paths = []
+    for spaxel in range(group_start, group_start + 15):
+        paths.append(
+            plot_fit_difference(
+                science_image,
+                initial_model,
+                final_model,
+                spaxel,
+                output_dir / f"tester_fit_difference_spaxel_{spaxel}.png",
+            )
+        )
+        stats = residual_stats(science_image, final_model, spaxel)
+        logger.info(
+            f"[spaxel {spaxel}] residual/row-peak: mean {stats['mean']:.2%}, median {stats['median']:.2%}, "
+            f"p90 {stats['p90']:.1%}, <1% {stats['under_1pct']:.0%}"
+        )
+    return paths
+
+
+def make_parameter_matrix_group(
+    group: int = 9,
+    iteration_max: int = 4,
+    output_dir: Path | None = None,
+    science_image_path: Path | str = "/global/homes/a/anousha/deep_skyflat_coadd.fits",
+    oversample_factor: int = 1,
+    workers: int = 6,
+    fresh: bool = True,
+    science_array: np.ndarray | None = None,
+) -> None:
+    """Fit the 15 spaxels of a group together.
+
+    Each iteration scans one shift or width value applied to all of them at once, so every spaxel is always fitted
+    against neighbours that carry the latest corrections. The scan values of an iteration are independent fits, so
+    they run in `workers` processes.
+    """
+    from concurrent.futures import ProcessPoolExecutor
+
+    global science_image, params
+    if science_array is not None:
+        science_image = science_array
+    else:
+        with fits.open(science_image_path) as hdul:
+            science_image = hdul[0].data  # type:ignore
+
+    group_start = 15 * group
+    spaxels = list(range(group_start, group_start + 15))
+    out = output_dir if output_dir is not None else Path.cwd()
+    out.mkdir(parents=True, exist_ok=True)
+    if fresh:
+        for sid in spaxels:
+            total_coeffs[str(sid)] = {"0": [0.0, 0.0, 0.0, 0.0, 0.0]}
+            total_widths[str(sid)] = {"0": [0.0, 0.0, 0.0, 0.0, 1.0]}
+    else:
+        _load_spaxel_jsons(spaxels, out)
+
+    shift_offsets = [-0.2, -0.1, 0, 0.1, 0.2]
+    width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
+
+    pool = (
+        ProcessPoolExecutor(max_workers=workers, initializer=_init_group_worker, initargs=(science_image,))
+        if workers > 1
+        else None
+    )
+    try:
+        for iteration in range(iteration_max):
+            is_offset_iter = iteration % 2 == 0
+            params = shift_offsets if is_offset_iter else width_multipliers
+            t0 = time.time()
+            shared = (is_offset_iter, oversample_factor, dict(total_coeffs), dict(total_widths))
+            if pool is not None:
+                futures = [pool.submit(_group_scan_task, group_start, p, *shared) for p in params]
+                scans = [f.result() for f in futures]
+            else:
+                scans = [_group_scan_task(group_start, p, *shared) for p in params]
+            # l1_calculations expects the results ordered by spaxel, then by scan value
+            flat_results = [scans[p][i] for i in range(15) for p in range(len(params))]
+            _raw(l1_calculations)(spaxels, flat_results, len(params), iteration, is_offset_iter)
+            _save_spaxel_jsons(spaxels, out, iteration + 1)
+            logger.info(f"[group {group}] iteration {iteration} done in {time.time() - t0:.0f}s")
+    finally:
+        if pool is not None:
+            pool.shutdown()
+
+    for path in _plot_group_fit_difference(group_start, out, oversample_factor):
+        logger.info(f"Saved initial vs best-fit difference plot to {path}")
+
+
+def _final_fit_and_animate(
+    spaxel: int, iteration_max: int, output_dir: Path, cleanup_fits: bool, oversample_factor: int = 4
+) -> None:
     spectra = np.concatenate(spec[15 * (spaxel // 15) : 15 * (spaxel // 15 + 1)])
     mat = makeShiftedMat.fn(
-        spaxel, np.zeros(225), np.zeros(225), oversample_factor=4, iteration=iteration_max
+        spaxel, np.zeros(225), np.zeros(225), oversample_factor=oversample_factor, iteration=iteration_max
     )
     fit.fn(mat, science_image, spectra, spaxel=spaxel, iteration=iteration_max, param=0.0)
 
@@ -851,6 +1035,7 @@ def run_make_parameter_matrix(
     logger.info(f"Updated science exposure header with coefficient paths at {science_exposure_path}")
 
     for spaxel in spaxels_to_process:
+        _plot_initial_vs_best_fit(spaxel, output_dir)
         _final_fit_and_animate(spaxel, iteration_max, output_dir, cleanup_fits)
 
 
@@ -885,7 +1070,27 @@ if __name__ == "__main__":
         help="Off by default. When on (--save-outputs), write the per-iteration FITS files, run the final fit + "
         "convergence animation, and clean up the FITS afterwards. Shift/width JSONs are always written.",
     )
+    parser.add_argument(
+        "--group",
+        type=int,
+        default=None,
+        help="Fit all 15 spaxels of this group together (e.g. 9 for spaxels 135-149); overrides --spaxels.",
+    )
+    parser.add_argument("--oversample", type=int, default=1, help="Oversample factor for --group runs.")
+    parser.add_argument("--workers", type=int, default=6, help="Parallel processes for the scan values (--group).")
     args = parser.parse_args()
+
+    if args.group is not None:
+        group_out = Path(args.output_dir) if args.output_dir else Path.cwd()
+        make_parameter_matrix_group(
+            args.group,
+            iteration_max=args.iteration_max,
+            output_dir=group_out,
+            science_image_path=args.science_image,
+            oversample_factor=args.oversample,
+            workers=args.workers,
+        )
+        raise SystemExit(0)
 
     if args.spaxels is None:
         spaxels = list(range(135, 150))

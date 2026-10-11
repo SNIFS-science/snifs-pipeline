@@ -198,6 +198,13 @@ def preprocess_exposure(conf: PreprocessExposureConfig) -> PreprocessSummary:
 
 
 if __name__ == "__main__":
+    import sys
+
+    # e.g. `python preprocess_exposure.py --primary_file /path/to/raw.fits [--refresh_filestore false]`
+    if any(arg.startswith("--primary_file") for arg in sys.argv[1:]):
+        preprocess_exposure(PreprocessExposureConfig())
+        raise SystemExit(0)
+
     raw_dir = Path(__file__).parents[3] / "data/level=raw"
     files = [
         # raw_dir / "runs/run_id=25_056_084/science_red.fits",

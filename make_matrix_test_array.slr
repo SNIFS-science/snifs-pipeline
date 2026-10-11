@@ -1,15 +1,13 @@
 #!/bin/bash -l
-# TEST script: single debug-node job that packs as many spaxels onto the node's
-# cores as will fit, all running concurrently as srun steps against a shared
-# Prefect server (no array, no master job, no separate worker jobs).
 #
 #SBATCH --job-name=matrix-test
 #SBATCH --time=00:30:00
 #SBATCH -A m112
 #SBATCH -C cpu
 #SBATCH -q debug
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=75
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=113
+#SBATCH --ntasks=225
 #SBATCH --cpus-per-task=2
 #SBATCH -o matrix_test_%j.out
 
@@ -21,18 +19,13 @@ export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 
-# $HOME is NERSC's "global homes" filesystem, which doesn't support the file
-# locking uv's cache needs — concurrent `uv run` calls there fail with
-# "Could not acquire lock ... Unknown error 524". Point the cache at $PSCRATCH
-# (Lustre, supports real locking) instead, which matters a lot now that up to
-# 64 `uv run` processes start at nearly the same instant below.
 export UV_CACHE_DIR="$PSCRATCH/uv-cache"
 mkdir -p "$UV_CACHE_DIR"
 
 # and --ntasks-per-node together (in lockstep) if that ever changes.
 # TODO: first spaxel to process (e.g. 135 to start mid-way through the 225).
 GROUP_START=0
-NUM_SPAXELS=75   # must match --ntasks-per-node above
+NUM_SPAXELS=225   # must match --ntasks-per-node above
 ITERATION_MAX=4  # trial value; the default full run uses 10
 
 # Override per job to run on different files, e.g.:

@@ -44,7 +44,7 @@ def wavelength_arc_calibration(conf: WavelengthArcCalibrationConfig):
     )
     logger.info(f"Built arc_vector at {arc_vector_path} and linespread at {linespread_path}")
 
-    return calibrate_wavelength_arc(arc_vector_path, linespread_path)
+    return calibrate_wavelength_arc(arc_vector_path, linespread_path, spaxels=spaxels, output_dir=conf.output_folder)
 
 
 if __name__ == "__main__":
