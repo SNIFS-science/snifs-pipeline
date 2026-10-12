@@ -78,6 +78,7 @@ rowindex, columnindex = np.meshgrid(np.arange(0, 2048, 1), np.arange(0, 4096, 1)
 
 spec: np.ndarray = np.ones((225, 1400))  # TODO: revert to np.ones((225, 1400))
 # spec: np.ndarray = pickle.load(open('/Users/anousha/Desktop/SNIFS/model/science_spectra.pkl','rb')) #science
+spec: np.ndarray = pickle.load(open('/global/homes/a/anousha/spectra_arc.pkl','rb')) #arc
 
 
 heights: np.ndarray = np.linspace(0, 4095, 256)
@@ -1041,6 +1042,7 @@ def run_make_parameter_matrix(
 
 if __name__ == "__main__":
     import argparse
+    import pickle
 
     parser = argparse.ArgumentParser()
     parser.add_argument(

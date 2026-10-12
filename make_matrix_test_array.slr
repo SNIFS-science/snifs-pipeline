@@ -1,10 +1,10 @@
 #!/bin/bash -l
 #
 #SBATCH --job-name=matrix-test
-#SBATCH --time=00:30:00
+#SBATCH --time=01:00:00
 #SBATCH -A m112
 #SBATCH -C cpu
-#SBATCH -q debug
+#SBATCH -q regular
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=113
 #SBATCH --ntasks=225
@@ -37,14 +37,20 @@ mkdir -p "$OUTPUT_DIR"
 cd $HOME/snifs-pipeline   # TODO: match your actual repo checkout path
 
 # Pre-build the venv so srun steps below don't each try to sync at once.
+# Pre-build the venv so srun steps below don't each try to sync at once.
 uv sync
+
+# --- Preflight: catch import/syntax errors before launching 225 steps ---
+if ! uv run --no-sync python -c "import pipeline.tasks.processing.make_parameter_matrix"; then
+    echo "ERROR: import check failed; aborting before launching srun steps." >&2
+    exit 1
+fi
 
 # --- Prefect server ---
 export PREFECT_HOME="/tmp/prefect_server_${USER}_${SLURM_JOB_ID}"
 PREFECT_PORT=8100
 COMPUTE_NODE=$(hostname)
 export PREFECT_API_URL="http://${COMPUTE_NODE}:${PREFECT_PORT}/api"
-# Tell the UI's JavaScript to reach the API through the SSH tunnel, not directly
 export PREFECT_UI_API_URL="http://localhost:9999/api"
 
 SERVER_INFO_FILE="${OUTPUT_DIR}/prefect_server_info.env"
@@ -59,18 +65,32 @@ echo "==========================================================="
 uv run --no-sync prefect server start --host 0.0.0.0 --port $PREFECT_PORT &
 SERVER_PID=$!
 
-# Poll the API instead of a fixed sleep, so we don't wait longer than necessary.
+# Always stop the server, whether we finish normally or abort.
+cleanup() {
+    kill "$SERVER_PID" 2>/dev/null
+    wait "$SERVER_PID" 2>/dev/null
+    echo "Prefect server stopped."
+}
+trap cleanup EXIT
+
+SERVER_UP=0
 for i in $(seq 1 60); do
-    if curl -s -o /dev/null -w "" "http://127.0.0.1:${PREFECT_PORT}/api/health"; then
+    if curl -s -o /dev/null "http://127.0.0.1:${PREFECT_PORT}/api/health"; then
         echo "Prefect server ready after ${i}s"
+        SERVER_UP=1
         break
     fi
     sleep 1
 done
+if [ "$SERVER_UP" -ne 1 ]; then
+    echo "ERROR: Prefect server did not come up within 60s; aborting." >&2
+    exit 1
+fi
 
-# --- Pack all spaxels onto this node as concurrent srun steps ---
-echo "Packing ${NUM_SPAXELS} spaxels (starting at ${GROUP_START}) onto 1 debug node"
+# --- Launch spaxels as concurrent srun steps ---
+echo "Launching ${NUM_SPAXELS} spaxels (starting at ${GROUP_START})"
 
+STEP_PIDS=()
 for i in $(seq 0 $((NUM_SPAXELS - 1))); do
     SPAXEL=$((GROUP_START + i))
     srun --exclusive -N1 -n1 -c"$SLURM_CPUS_PER_TASK" \
@@ -79,13 +99,19 @@ for i in $(seq 0 $((NUM_SPAXELS - 1))); do
         --iteration-max "$ITERATION_MAX" \
         --science-image "$SCIENCE_IMAGE" \
         --output-dir "$OUTPUT_DIR" &
+    STEP_PIDS+=($!)
 done
 
-wait
+# Wait only on the srun steps (not the server); abort on the first failure.
+for pid in "${STEP_PIDS[@]}"; do
+    if ! wait "$pid"; then
+        echo "ERROR: an srun step (pid $pid) failed; killing remaining steps." >&2
+        kill "${STEP_PIDS[@]}" 2>/dev/null
+        wait "${STEP_PIDS[@]}" 2>/dev/null
+        sacct -j "$SLURM_JOB_ID" --format=JobID,Elapsed,MaxRSS,State | head -20
+        exit 1
+    fi
+done
+
 echo "All ${NUM_SPAXELS} spaxels finished"
 sacct -j "$SLURM_JOB_ID" --format=JobID,Elapsed,MaxRSS,State | head -20
-
-# --- Shut down server ---
-kill $SERVER_PID
-wait $SERVER_PID 2>/dev/null
-echo "Prefect server stopped."
