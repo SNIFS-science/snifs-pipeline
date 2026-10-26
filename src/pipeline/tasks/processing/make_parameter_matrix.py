@@ -1,7 +1,10 @@
 import base64
 import json
 import os
+import pickle
 import resource
+import socket
+import subprocess
 import time
 from io import BytesIO
 from pathlib import Path
@@ -36,6 +39,12 @@ from pipeline.common.model_params import (
     Z_4TH,
 )
 from pipeline.common.prefect_utils import create_image_artifact, create_markdown_artifact, pipeline_flow, pipeline_task
+from pipeline.resolver.common import (
+    FileType,
+    extract_details_from_asdf,
+    extract_details_from_fits,
+    extract_file_details,
+)
 from pipeline.tasks.plotting.wavelength_arc_calibration_plots import (
     animate_poly_convergence,
     plot_fit_difference,
@@ -65,6 +74,25 @@ n_cross = (np.log(0.0032) - np.log(6.90e-4)) / (np.log(4.917) - np.log(26.939))
 n_spec = (np.log(0.0040) - np.log(8.447e-4)) / (np.log(4.52) - np.log(21.026))
 
 
+def _git_commit() -> str:
+    """Short HEAD commit of the repo this file lives in, with '+dirty' if there are uncommitted changes."""
+    repo = str(Path(__file__).resolve().parent)
+    try:
+        sha = subprocess.run(
+            ["git", "-C", repo, "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True, timeout=10
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return f"{sha}+dirty" if dirty else sha
+
+
 def _peak_memory_mb() -> float:
     """Return peak RSS in MB (works on Linux and macOS)."""
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -76,9 +104,12 @@ start_time = time.time()
 
 rowindex, columnindex = np.meshgrid(np.arange(0, 2048, 1), np.arange(0, 4096, 1))
 
-spec: np.ndarray = np.ones((225, 1400))  # TODO: revert to np.ones((225, 1400))
-# spec: np.ndarray = pickle.load(open('/Users/anousha/Desktop/SNIFS/model/science_spectra.pkl','rb')) #science
-spec: np.ndarray = pickle.load(open('/global/homes/a/anousha/spectra_arc.pkl','rb')) #arc
+SPECTRA_DIR = Path(__file__).resolve().parents[4]  # repository root, where the reference spectra live
+ARC_SPECTRA = SPECTRA_DIR / "spectra_arc.pkl"
+SCIENCE_SPECTRA = SPECTRA_DIR / "spectra_science.pkl"
+# Reference spectra of the image being fitted, set by the flows with select_spectra(); fit() uses them for its
+# "model > 0" pixel mask
+spec: np.ndarray = np.ones((225, 1400))
 
 
 heights: np.ndarray = np.linspace(0, 4095, 256)
@@ -86,6 +117,76 @@ n_bins: int = len(heights) - 1
 x_sparse: np.ndarray = np.linspace(0, 4095, 256) + 8
 science_image: np.ndarray | None = None
 params: list[float] = []
+
+
+def _load_science_image(path: Path | str) -> np.ndarray:
+    """Load a FITS or ASDF image as (4096, 2048).
+
+    Preprocessed outputs are stored as (2048, 4096). Pixels preprocessing marked bad (infinite variance) become NaN.
+
+    Args:
+        path: FITS or ASDF image.
+
+    Returns:
+        np.ndarray: The (4096, 2048) image.
+    """
+    path = Path(path)
+    image = Image.from_asdf(path) if path.suffix.lower() == ".asdf" else Image.from_fits_file(path)
+    data = np.asarray(image.data, dtype=float)
+    if image.variance is not None and np.shape(image.variance) == data.shape:
+        data = np.where(np.isinf(image.variance), np.nan, data)
+    if data.shape == (2048, 4096):
+        data = np.ascontiguousarray(data.T)
+    if data.shape != (4096, 2048):
+        raise ValueError(f"Unexpected science image shape {data.shape} in {path}; expected (4096, 2048)")
+    return data
+
+
+def exposure_type(image_path: Path | str) -> FileType:
+    """Exposure type of an image, classified as in preprocessing.
+
+    Uses the pipeline's file classification (the OBSTYPE header or a type= folder) for files in the data layout and
+    the OBSTYPE header otherwise. A deep sky flat is recorded as OBJECT but counts as a continuum.
+
+    Args:
+        image_path: FITS or ASDF image.
+
+    Returns:
+        FileType: SCIENCE, CONTINUUM or ARC (or another type preprocessing knows).
+    """
+    path = Path(image_path)
+    if "skyflat" in path.name.lower():
+        return FileType.CONTINUUM
+    if "level=" in str(path.resolve()):
+        details = extract_file_details(path)
+        if details is not None:
+            return FileType(details["file_type"][0])
+    header = extract_details_from_fits(path) if path.suffix.lower() == ".fits" else extract_details_from_asdf(path)
+    return FileType(header["file_type"])
+
+
+def select_spectra(image_path: Path | str) -> np.ndarray:
+    """Reference spectra for an image: ones for a continuum, the arc or science spectra otherwise.
+
+    Args:
+        image_path: FITS or ASDF image.
+
+    Returns:
+        np.ndarray: (225, 1400) spectra.
+    """
+    file_type = exposure_type(image_path)
+    if file_type == FileType.CONTINUUM:
+        spectra = np.ones((225, 1400))
+    elif file_type in (FileType.ARC, FileType.SCIENCE):
+        path = ARC_SPECTRA if file_type == FileType.ARC else SCIENCE_SPECTRA
+        if not path.exists():
+            raise FileNotFoundError(f"No reference spectra for {file_type.name} images: {path} is missing")
+        with path.open("rb") as f:
+            spectra = np.asarray(pickle.load(f))
+    else:
+        raise ValueError(f"No reference spectra for {file_type.name} images ({image_path})")
+    logger.info(f"Reference spectra for {Path(image_path).name}: {file_type.name}")
+    return spectra
 
 
 def combine_spaxel_jsons(output_dir: Path) -> None:
@@ -151,8 +252,9 @@ def _build_spaxel_rows(
             b0 = 0
         b1 = int(B1_PARAMS[spaxel_ID] + xoff + 50) + 1
 
-        xsub = np.linspace(0, a1 - a0 - 1, (a1 - a0) * oversample_factor)
-        ysub = np.linspace(0, b1 - b0 - 1, (b1 - b0) * oversample_factor)
+        # Sub-sample centres: block k of oversample_factor samples is centred on pixel k
+        xsub = (np.arange((a1 - a0) * oversample_factor) + 0.5) / oversample_factor - 0.5
+        ysub = (np.arange((b1 - b0) * oversample_factor) + 0.5) / oversample_factor - 0.5
         xv_sub, yv_sub = np.meshgrid(ysub, xsub)
 
         rowind_slab = rowindex[a0:a1, b0:b1]
@@ -516,6 +618,7 @@ def fit(
 
     return fitModel
 
+
 def fit_best_shift(shifts, values, degree=4):
     """Fit a degree-N polynomial and return the shift at the minimum."""
     coeffs = np.polyfit(shifts, values, degree)
@@ -726,12 +829,12 @@ def make_parameter_matrix_old(
     shift_offsets = [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2]
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
-    global science_image, params
+    global science_image, params, spec
     if science_array is not None:
         science_image = science_array
     else:
-        with fits.open(science_image_path) as hdul:
-            science_image = hdul[0].data  # type:ignore
+        science_image = _load_science_image(science_image_path)
+    spec = select_spectra(science_image_path)
 
     spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else [8]
     out = output_dir if output_dir is not None else Path.cwd()
@@ -842,9 +945,10 @@ def _group_bin_stats(model: np.ndarray, group_start: int) -> np.ndarray:
     return stats
 
 
-def _init_group_worker(image: np.ndarray) -> None:
-    global science_image
+def _init_group_worker(image: np.ndarray, spectra: np.ndarray) -> None:
+    global science_image, spec
     science_image = image
+    spec = spectra
 
 
 def _group_scan_task(
@@ -886,6 +990,7 @@ def _plot_group_fit_difference(group_start: int, output_dir: Path, oversample_fa
     return paths
 
 
+@pipeline_flow()
 def make_parameter_matrix_group(
     group: int = 9,
     iteration_max: int = 4,
@@ -895,6 +1000,8 @@ def make_parameter_matrix_group(
     workers: int = 6,
     fresh: bool = True,
     science_array: np.ndarray | None = None,
+    hostname: str | None = None,
+    git_commit: str | None = None,
 ) -> None:
     """Fit the 15 spaxels of a group together.
 
@@ -904,12 +1011,14 @@ def make_parameter_matrix_group(
     """
     from concurrent.futures import ProcessPoolExecutor
 
-    global science_image, params
+    logger.info(f"[group {group}] host={hostname} git_commit={git_commit}")
+
+    global science_image, params, spec
     if science_array is not None:
         science_image = science_array
     else:
-        with fits.open(science_image_path) as hdul:
-            science_image = hdul[0].data  # type:ignore
+        science_image = _load_science_image(science_image_path)
+    spec = select_spectra(science_image_path)
 
     group_start = 15 * group
     spaxels = list(range(group_start, group_start + 15))
@@ -926,7 +1035,7 @@ def make_parameter_matrix_group(
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
     pool = (
-        ProcessPoolExecutor(max_workers=workers, initializer=_init_group_worker, initargs=(science_image,))
+        ProcessPoolExecutor(max_workers=workers, initializer=_init_group_worker, initargs=(science_image, spec))
         if workers > 1
         else None
     )
@@ -1005,9 +1114,10 @@ def run_make_parameter_matrix(
     shift_offsets = [-0.2, -0.1, 0, 0.1, 0.2]
     width_multipliers = [-0.2, -0.1, 0, 0.1, 0.2, 0.3]
 
-    global science_image, params
+    global science_image, params, spec
     image = Image.from_asdf(science_exposure_path)
     science_image = image.data.T  # transpose to match the orientation used in the original code
+    spec = select_spectra(science_exposure_path)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     spaxels_to_process = spaxels_to_process if spaxels_to_process is not None else list(range(225))
@@ -1042,7 +1152,6 @@ def run_make_parameter_matrix(
 
 if __name__ == "__main__":
     import argparse
-    import pickle
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -1052,7 +1161,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--science-image",
         type=str,
-        default="/global/homes/a/anousha/deep_skyflat_coadd.fits",
+        default="/home/anousha/snifs-pipeline/deep_skyflat_coadd.fits",
         help="Path to the science image FITS file to fit",
     )
     parser.add_argument(
@@ -1091,7 +1200,11 @@ if __name__ == "__main__":
             science_image_path=args.science_image,
             oversample_factor=args.oversample,
             workers=args.workers,
+            hostname=socket.gethostname(),
+            git_commit=_git_commit(),
         )
+        combine_spaxel_jsons(group_out)
+        logger.info(f"Combined JSONs written to {group_out}")
         raise SystemExit(0)
 
     if args.spaxels is None:

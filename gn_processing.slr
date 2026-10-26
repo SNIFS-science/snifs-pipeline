@@ -1,0 +1,190 @@
+#!/bin/bash -l
+#
+# Gauss-Newton fit of the whole image: one array task per spaxel GROUP (15 spaxels fitted together, 16 CPUs each),
+# at most 8 running at once. Each task runs gauss_newton_make_parameter_matrix.py once; it fits the shift and width
+# first, then also the core power, wing amplitude and shoulder asymmetry, and writes only the final results.
+# Every task reports to the shared Prefect server below.
+#
+# Usage:
+#   sbatch gn_processing.slr
+#   SCIENCE_IMAGE=/path/to/other.fits OUTPUT_DIR=$HOME/out/other sbatch gn_processing.slr
+#   sbatch --array=9 gn_processing.slr             # only group 9 (spaxels 135-149)
+#
+# After the whole array finishes, a small follow-up job merges the groups' results into
+# $OUTPUT_DIR/gn_loop_{shifts,widths}_editable.json (all spaxels) and $OUTPUT_DIR/gn_profile_by_group.json.
+#
+#SBATCH --job-name=gn-matrix
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=32G
+#SBATCH --time=04:00:00
+#SBATCH --array=0-14%8
+#SBATCH -o gn_matrix_%A_%a.out
+
+set -uo pipefail
+
+export PATH="$HOME/.local/bin:$PATH"
+
+# Each worker process builds one spaxel single-threaded; stop BLAS/OpenMP from spawning idle threads.
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+# --- Configuration (override via environment at submit time) ---
+REPO_DIR="${REPO_DIR:-$HOME/snifs-pipeline}"
+SCIENCE_IMAGE="${SCIENCE_IMAGE:-$HOME/snifs-pipeline/deep_skyflat_coadd.fits}"
+OUTPUT_DIR="${OUTPUT_DIR:-$REPO_DIR/output/level=processed/24_036_037_001/gauss_newton}"
+GROUP_OFFSET="${GROUP_OFFSET:-0}"      # group = GROUP_OFFSET + array task id
+WORKERS="${WORKERS:-15}"               # processes building spaxels; one per group spaxel, keep <= --cpus-per-task
+ITERATION_MAX="${ITERATION_MAX:-10}"   # per stage; group 9 converged in 4-7
+
+# Shared Prefect server (the API lives under /api; /dashboard is just the UI).
+export PREFECT_API_URL="${PREFECT_API_URL:-http://prefect.snifs.development.svc.spin.nersc.org/api}"
+# The server requires basic auth. Put "username:password" alone on one line in a chmod 600 file
+# (default ~/.prefect_auth), or pass PREFECT_API_AUTH_STRING at submit time. Never hardcode it here.
+PREFECT_AUTH_FILE="${PREFECT_AUTH_FILE:-$HOME/.prefect_auth}"
+if [ -z "${PREFECT_API_AUTH_STRING:-}" ] && [ -r "$PREFECT_AUTH_FILE" ]; then
+    PREFECT_API_AUTH_STRING="$(head -n1 "$PREFECT_AUTH_FILE")"
+fi
+if [ -n "${PREFECT_API_AUTH_STRING:-}" ]; then
+    export PREFECT_API_AUTH_STRING
+else
+    echo "ERROR: no Prefect credentials. Create $PREFECT_AUTH_FILE containing username:password" >&2
+    exit 1
+fi
+# Per-job profile dir so concurrent tasks don't fight over ~/.prefect.
+export PREFECT_HOME="/tmp/prefect_${USER}_${SLURM_JOB_ID}"
+
+GROUP=$((GROUP_OFFSET + SLURM_ARRAY_TASK_ID))
+TASK_DIR="${OUTPUT_DIR}/group_${GROUP}"
+mkdir -p "$TASK_DIR" || { echo "ERROR: cannot create $TASK_DIR (OUTPUT_DIR=$OUTPUT_DIR)" >&2; exit 1; }
+
+echo "Task ${SLURM_ARRAY_TASK_ID}: group ${GROUP} (spaxels $((15 * GROUP))-$((15 * GROUP + 14))) on $(hostname)"
+echo "Prefect server: ${PREFECT_API_URL}"
+echo "Dashboard:      ${PREFECT_API_URL%/api}/dashboard"
+
+cd "$REPO_DIR" || { echo "ERROR: cannot cd to REPO_DIR=$REPO_DIR" >&2; exit 1; }
+
+if [ ! -f "$SCIENCE_IMAGE" ]; then
+    echo "ERROR: science image not found: $SCIENCE_IMAGE" >&2
+    exit 1
+fi
+
+# --- Submit the combine job once, from whichever array task starts first ---
+# Waits for the entire array (including tasks still queued behind the %8 throttle). The empty
+# .combine_submitted_<job> directory is only a lock against submitting it twice; the combine job removes it.
+if mkdir "${OUTPUT_DIR}/.combine_submitted_${SLURM_ARRAY_JOB_ID}" 2>/dev/null; then
+    COMBINE_JOB=$(sbatch --parsable \
+        --job-name=gn-combine \
+        --dependency="afterany:${SLURM_ARRAY_JOB_ID}" \
+        --time=00:15:00 \
+        --cpus-per-task=1 \
+        -o "gn_combine_${SLURM_ARRAY_JOB_ID}.out" \
+        --wrap "cd '$REPO_DIR' && PATH='$HOME/.local/bin':\$PATH uv run --no-sync python -I - '$OUTPUT_DIR' <<'PY'
+import json, sys
+from pathlib import Path
+
+out = Path(sys.argv[1])
+done = sorted(p.parent for p in out.glob('group_*/.done'))
+missing = sorted({p.name for p in out.glob('group_*') if p.is_dir()} - {d.name for d in done})
+for kind in ('shifts', 'widths'):
+    merged = {}
+    for d in done:
+        merged.update(json.loads((d / f'gn_loop_{kind}_editable.json').read_text()))
+    (out / f'gn_loop_{kind}_editable.json').write_text(json.dumps(merged, indent=2))
+    print(f'{kind}: merged {len(done)} finished groups -> {len(merged)} spaxels')
+profiles = {}
+for d in done:
+    history = json.loads((d / 'gn_profile_editable.json').read_text())
+    profiles[d.name.removeprefix('group_')] = history[str(max(int(k) for k in history))]
+(out / 'gn_profile_by_group.json').write_text(json.dumps(profiles, indent=2))
+print(f'profiles: {len(profiles)} groups')
+if missing:
+    print(f'NOT finished (left out): {missing}')
+PY
+rmdir '${OUTPUT_DIR}/.combine_submitted_${SLURM_ARRAY_JOB_ID}'")
+    echo "Submitted combine job ${COMBINE_JOB} (runs after array ${SLURM_ARRAY_JOB_ID})"
+fi
+
+# --- Skip work already finished by an earlier attempt (e.g. after a requeue) ---
+if [ -e "${TASK_DIR}/.done" ]; then
+    echo "Group ${GROUP} already done in ${TASK_DIR}; skipping"
+    exit 0
+fi
+
+# --- Build the venv once; the lock stops 8 simultaneous tasks syncing at the same time ---
+(
+    flock 9
+    uv sync
+) 9>"${REPO_DIR}/.uv-sync.lock" || { echo "ERROR: uv sync failed" >&2; exit 1; }
+
+# --- Check the Prefect server is reachable from this node before doing real work ---
+# Uses the real Prefect client with credentials: /api/health is open, but the rest of the API is not.
+for attempt in 1 2 3 4 5; do
+    CHECK_OUT=$(uv run --no-sync python -c "
+from prefect import get_client
+with get_client(sync_client=True) as c:
+    print('Prefect API version', c.api_version())
+" 2>&1)
+    if [ $? -eq 0 ]; then
+        echo "$CHECK_OUT" | tail -1
+        break
+    fi
+    if [ "$attempt" -eq 5 ]; then
+        echo "ERROR: cannot use Prefect server ${PREFECT_API_URL} from $(hostname):" >&2
+        echo "$CHECK_OUT" | tail -3 >&2
+        echo "If this is a 401, check the username:password in $PREFECT_AUTH_FILE." >&2
+        exit 1
+    fi
+    sleep 5
+done
+
+# On scancel/timeout SLURM signals the job. Keep this shell alive for a short grace period so the
+# Python process can tell Prefect the run ended, instead of leaving it "Running" on the server.
+PY_PID=""
+on_term() {
+    echo "Caught termination signal; forwarding SIGTERM to python (pid ${PY_PID:-none}) and waiting up to 25s" >&2
+    if [ -n "$PY_PID" ]; then
+        kill -TERM "$PY_PID" 2>/dev/null
+        for _ in $(seq 1 25); do
+            kill -0 "$PY_PID" 2>/dev/null || break
+            sleep 1
+        done
+    fi
+    exit 143
+}
+trap on_term TERM INT
+
+# Run the venv's python directly (not via `uv run`) so $! is the python process itself and the
+# SIGTERM above reaches it without relying on uv to forward it.
+# The inline wrapper installs a SIGTERM handler before Prefect's: when a flow gets SIGTERM, Prefect
+# re-sends it to the process with the previous handler, and with Python's default handler the
+# process dies before the Crashed state reaches the server (run stays "Running"). Absorbing that
+# second signal lets the crash be recorded; the timer hard-exits if shutdown stalls.
+"$REPO_DIR/.venv/bin/python" -c '
+import os, runpy, signal, sys, threading
+
+def absorb(signum, frame):
+    t = threading.Timer(15, os._exit, args=(143,))
+    t.daemon = True
+    t.start()
+
+signal.signal(signal.SIGTERM, absorb)
+script = sys.argv[1]
+sys.argv = sys.argv[1:]
+runpy.run_path(script, run_name="__main__")
+' src/pipeline/tasks/processing/gauss_newton_make_parameter_matrix.py \
+    --group "$GROUP" \
+    --workers "$WORKERS" \
+    --iteration-max "$ITERATION_MAX" \
+    --science-image "$SCIENCE_IMAGE" \
+    --fit-asymmetry --asymmetry-mode shoulder --save-model \
+    --output-dir "$TASK_DIR" &
+PY_PID=$!
+wait "$PY_PID"
+STATUS=$?
+[ "$STATUS" -eq 0 ] && touch "${TASK_DIR}/.done"
+
+echo "Group ${GROUP} finished with exit status ${STATUS}"
+exit $STATUS

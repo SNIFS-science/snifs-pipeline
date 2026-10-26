@@ -1,0 +1,298 @@
+===========================================================
+Prefect server: titan1:8100
+To watch the UI:  ssh -L 9999:titan1:8100 anousha@titan.lbl.gov
+then open:        http://localhost:9999
+===========================================================
+Resolved 156 packages in 1ms
+Checked 154 packages in 42ms
+
+ ___ ___ ___ ___ ___ ___ _____
+| _ \ _ \ __| __| __/ __|_   _|
+|  _/   / _|| _|| _| (__  | |
+|_| |_|_\___|_| |___\___| |_|
+
+Configure Prefect to communicate with the server with:
+
+    prefect config set PREFECT_API_URL=http://0.0.0.0:8100/api
+
+View the API reference documentation at http://0.0.0.0:8100/docs
+
+Check out the dashboard at http://0.0.0.0:8100
+
+
+
+Submitted worker for spaxels 75-89: job 3797
+Waiting for 1 worker jobs...
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/uvicorn/protocols/websockets/websockets_impl.py", line 244, in run_asgi
+    result = await self.app(self.scope, self.asgi_receive, self.asgi_send)  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/applications.py", line 1139, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/applications.py", line 107, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/prefect/server/api/server.py", line 192, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 462, in handle
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/applications.py", line 1139, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/applications.py", line 107, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/gzip.py", line 19, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 462, in handle
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/staticfiles.py", line 91, in __call__
+    assert scope["type"] == "http"
+           ^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/applications.py", line 1139, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/applications.py", line 107, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/prefect/server/api/server.py", line 192, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 462, in handle
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/applications.py", line 1139, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/applications.py", line 107, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/gzip.py", line 29, in __call__
+    await responder(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/gzip.py", line 46, in __call__
+    await self.app(scope, receive, self.send_with_compression)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 462, in handle
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/staticfiles.py", line 98, in __call__
+    response = await self.get_response(path, scope)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/prefect/server/api/server.py", line 172, in get_response
+    return await super().get_response(path, scope)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/staticfiles.py", line 117, in get_response
+    full_path, stat_result = await anyio.to_thread.run_sync(self.lookup_path, path)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/anyio/to_thread.py", line 61, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 2525, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 986, in run
+    result = context.run(func, *args)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/staticfiles.py", line 158, in lookup_path
+    full_path = os.path.realpath(joined_path)
+  File "<frozen posixpath>", line 454, in realpath
+ValueError: lstat: embedded null character in path
+WARNING:  Invalid HTTP request received.
+WARNING:  Unsupported upgrade request.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/applications.py", line 1139, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/applications.py", line 107, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/prefect/server/api/server.py", line 192, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 462, in handle
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/applications.py", line 1139, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/applications.py", line 107, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/gzip.py", line 29, in __call__
+    await responder(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/gzip.py", line 46, in __call__
+    await self.app(scope, receive, self.send_with_compression)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/routing.py", line 462, in handle
+    await self.app(scope, receive, send)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/staticfiles.py", line 98, in __call__
+    response = await self.get_response(path, scope)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/prefect/server/api/server.py", line 172, in get_response
+    return await super().get_response(path, scope)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/staticfiles.py", line 117, in get_response
+    full_path, stat_result = await anyio.to_thread.run_sync(self.lookup_path, path)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/anyio/to_thread.py", line 61, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 2525, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 986, in run
+    result = context.run(func, *args)
+  File "/Volumes/home/anousha/snifs-pipeline/.venv/lib/python3.13/site-packages/starlette/staticfiles.py", line 158, in lookup_path
+    full_path = os.path.realpath(joined_path)
+  File "<frozen posixpath>", line 454, in realpath
+ValueError: lstat: embedded null character in path
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+All workers finished.
+Combined JSONs written to /home/anousha/snifs-pipeline/output/make_matrix
+Prefect server stopped.

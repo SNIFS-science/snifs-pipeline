@@ -4,11 +4,23 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
+from numpy.polynomial import Polynomial
 from scipy import sparse
+from scipy.optimize import nnls
+from scipy.special import erf
 
 from pipeline import settings
 from pipeline.common import Image, get_logger, pipeline_task
-from pipeline.common.model_params import A0_PARAMS, A1_PARAMS, B0_PARAMS, B1_PARAMS
+from pipeline.common.model_params import (
+    A0_PARAMS,
+    A1_PARAMS,
+    B0_PARAMS,
+    B1_PARAMS,
+    QUARTIC_LINEAR_PARAMS,
+    Z_1ST,
+    Z_2ND,
+    Z_4TH,
+)
 from pipeline.common.plotting_utils import get_all_peaks
 from pipeline.resolver.resolver import PUBLIC_PATH_MAP, get_run_id
 from pipeline.tasks.plotting.plots import CMAP_DATA, CMAP_DIFF, add_colorbar, plot_standalone
@@ -615,22 +627,220 @@ if __name__ == "__main__":
         plt.show()
 
 
+N_ELEMENTS = 1400
+NOISE_SIGMAS = 2  # a pixel is noise-limited when 1% of its row's own peak is under this many noise sigmas
+
+
+def trace_centres(shift_curves: dict[int, np.ndarray] | None = None) -> dict[int, tuple[int, np.ndarray]]:
+    """Trace centre of every spaxel: the nominal trace of make_parameter_matrix plus a fitted shift.
+
+    Args:
+        shift_curves: {spaxel: shift per spectral element}; spaxels left out get no shift.
+
+    Returns:
+        dict[int, tuple[int, np.ndarray]]: {spaxel: (first row, centre column of each of its 1400 elements)}.
+    """
+    elements = np.arange(N_ELEMENTS)
+    centres = {}
+    for sid in range(len(A0_PARAMS)):
+        b0 = int(B0_PARAMS[sid] - 50)
+        off = 50
+        if b0 < 0:
+            off += b0
+            b0 = 0
+        nominal = Polynomial([QUARTIC_LINEAR_PARAMS[sid], Z_1ST[sid], Z_2ND[sid], 0, Z_4TH[sid]])(elements) + off
+        shift = shift_curves.get(sid, 0.0) if shift_curves else 0.0
+        centres[sid] = (int(A0_PARAMS[sid]), b0 + nominal + shift)
+    return centres
+
+
+def own_columns(
+    spaxel: int, centres: dict[int, tuple[int, np.ndarray]], max_half_width: float = 5.0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Columns belonging to a spaxel in each of its rows.
+
+    A spaxel owns the pixels up to halfway to the nearest other trace on each side, at most max_half_width away.
+    Pixel x is owned if left <= x < right.
+
+    Args:
+        spaxel: Spaxel index.
+        centres: Output of trace_centres.
+        max_half_width: Largest distance from the trace centre (px).
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: (rows, left edges, right edges), one entry per spectral element.
+    """
+    a0, centre = centres[spaxel]
+    rows = a0 + np.arange(N_ELEMENTS)
+    left_gap = np.full(N_ELEMENTS, np.inf)
+    right_gap = np.full(N_ELEMENTS, np.inf)
+    for sid, (other_a0, other_centre) in centres.items():
+        if sid == spaxel:
+            continue
+        elements = rows - other_a0
+        present = (elements >= 0) & (elements < N_ELEMENTS)
+        offset = np.full(N_ELEMENTS, np.nan)
+        offset[present] = other_centre[elements[present]] - centre[present]
+        right_gap = np.where(offset > 0, np.minimum(right_gap, offset), right_gap)
+        left_gap = np.where(offset < 0, np.minimum(left_gap, -offset), left_gap)
+    left_half = np.minimum(left_gap / 2, max_half_width)
+    right_half = np.minimum(right_gap / 2, max_half_width)
+    return rows, centre - left_half, centre + right_half
+
+
+def noise_model(
+    science_image: np.ndarray, model: np.ndarray, region: np.ndarray | None = None
+) -> tuple[float, float, float]:
+    """Pixel noise model sigma**2 = a + b * flux + c * flux**2, measured from the data.
+
+    Uses differences between adjacent rows of science - model, where slow model errors cancel; c captures
+    pixel-to-pixel response structure (about 0.35% of the flux in the blue deep sky flat).
+
+    Args:
+        science_image: The image.
+        model: Model of the image.
+        region: Pixels to use (default model > 0).
+
+    Returns:
+        tuple[float, float, float]: (a, b, c).
+    """
+    science, model = np.asarray(science_image, dtype=float), np.asarray(model, dtype=float)
+    use = (model > 0) if region is None else np.asarray(region, dtype=bool) & (model > 0)
+    pair = use[1:] & use[:-1]
+    diff = ((science[1:] - model[1:]) - (science[:-1] - model[:-1]))[pair] / np.sqrt(2)
+    flux = 0.5 * (model[1:] + model[:-1])[pair]
+    ok = np.isfinite(diff) & np.isfinite(flux)
+    diff, flux = diff[ok], flux[ok]
+    edges = np.unique(np.quantile(flux, np.linspace(0, 1, 21)))
+    which = np.clip(np.digitize(flux, edges) - 1, 0, len(edges) - 2)
+    centres_, variances = [], []
+    for k in range(len(edges) - 1):
+        d = diff[which == k]
+        if len(d) > 50:
+            centres_.append(np.median(flux[which == k]))
+            variances.append((1.4826 * np.median(np.abs(d - np.median(d)))) ** 2)
+    # Non-negative fit, each bin weighted by its own variance so faint and bright bins count alike
+    flux_bins, variances = np.asarray(centres_), np.asarray(variances)
+    design = np.stack([np.ones_like(flux_bins), flux_bins, flux_bins**2], axis=1) / variances[:, None]
+    a, b, c = nnls(design, np.ones_like(variances))[0]
+    return float(a), float(b), float(c)
+
+
+def noise_sigma(noise: tuple[float, float, float], flux: np.ndarray) -> np.ndarray:
+    """Pixel noise sigma at a given flux.
+
+    Args:
+        noise: Output of noise_model.
+        flux: Model flux.
+
+    Returns:
+        np.ndarray: Sigma for each flux value.
+    """
+    a, b, c = noise
+    flux = np.clip(flux, 0, None)
+    return np.sqrt(a + b * flux + c * flux**2)
+
+
+def _own_pixel_crop(spaxel: int, centres: dict[int, tuple[int, np.ndarray]], rows: slice, cols: slice) -> np.ndarray:
+    """Mask of a spaxel's own pixels (see own_columns) over a crop.
+
+    Args:
+        spaxel: Spaxel index.
+        centres: Output of trace_centres.
+        rows: Row range of the crop.
+        cols: Column range of the crop.
+
+    Returns:
+        np.ndarray: Boolean mask of the crop's shape.
+    """
+    own_rows, left, right = own_columns(spaxel, centres)
+    mask = np.zeros((rows.stop - rows.start, cols.stop - cols.start), dtype=bool)
+    x = np.arange(cols.start, cols.stop)
+    inside = (own_rows >= rows.start) & (own_rows < rows.stop)
+    for r, lo, hi in zip(own_rows[inside], left[inside], right[inside], strict=True):
+        mask[r - rows.start] = (x >= lo) & (x < hi)
+    return mask
+
+
+def _own_fraction(science: np.ndarray, model: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Residual relative to each row's own peak.
+
+    Args:
+        science: Science crop.
+        model: Model crop.
+        mask: Own pixels of the crop.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: |science - model| / own peak (NaN outside the mask), and the own peak per row.
+    """
+    own_science = np.where(mask, science, np.nan)
+    with np.errstate(all="ignore"):
+        peak = np.nanmax(own_science, axis=1, keepdims=True)
+        frac = np.where(mask, np.abs(science - model) / peak, np.nan)
+    return frac, peak[:, 0]
+
+
 def residual_stats(
-    science_image: np.ndarray, model: np.ndarray, spaxel: int, valid_mask: np.ndarray | None = None
+    science_image: np.ndarray,
+    model: np.ndarray,
+    spaxel: int,
+    valid_mask: np.ndarray | None = None,
+    centres: dict[int, tuple[int, np.ndarray]] | None = None,
+    noise: tuple[float, float, float] | None = None,
 ) -> dict[str, float]:
-    """|science - model| / peak science of the same spectral row, over the spaxel's whole +-50 column crop."""
+    """Statistics of |science - model| relative to a row peak for one spaxel.
+
+    Without centres: every pixel of the spaxel's +-50 column crop, normalised by the crop's row peak. With centres:
+    only the spaxel's own pixels over all its rows, normalised by the row's own peak.
+
+    Args:
+        science_image: The image.
+        model: Model of the image.
+        spaxel: Spaxel index.
+        valid_mask: Pixels to include (default all).
+        centres: Output of trace_centres, for the own-pixel metric.
+        noise: Output of noise_model; adds noise_ceiling (the <1% fraction a perfect model would get) and
+            noise_limited (fraction of pixels where 1% of the own peak is under NOISE_SIGMAS sigma).
+
+    Returns:
+        dict[str, float]: "mean", "median", "p90", "under_1pct", plus the noise entries if noise is given.
+    """
     a0, a1 = int(A0_PARAMS[spaxel]), int(A1_PARAMS[spaxel]) + 1
     b0, b1 = max(int(B0_PARAMS[spaxel]) - 50, 0), int(B1_PARAMS[spaxel]) + 51
-    science = np.asarray(science_image)[a0:a1, b0:b1]
-    frac = np.abs(science - np.asarray(model)[a0:a1, b0:b1]) / np.nanmax(science, axis=1, keepdims=True)
+    if centres is None:
+        science = np.asarray(science_image)[a0:a1, b0:b1]
+        frac = np.abs(science - np.asarray(model)[a0:a1, b0:b1]) / np.nanmax(science, axis=1, keepdims=True)
+        if valid_mask is not None:
+            frac = frac[np.asarray(valid_mask)[a0:a1, b0:b1]]
+        return {
+            "mean": float(np.nanmean(frac)),
+            "median": float(np.nanmedian(frac)),
+            "p90": float(np.nanpercentile(frac, 90)),
+            "under_1pct": float(np.nanmean(frac < 0.01)),
+        }
+
+    height, width = np.shape(science_image)
+    rows = slice(a0, min(a0 + N_ELEMENTS, height))
+    cols = slice(b0, min(b1, width))  # crops of spaxels at the detector edge run past it
+    mask = _own_pixel_crop(spaxel, centres, rows, cols)
     if valid_mask is not None:
-        frac = frac[np.asarray(valid_mask)[a0:a1, b0:b1]]
-    return {
-        "mean": float(np.nanmean(frac)),
-        "median": float(np.nanmedian(frac)),
-        "p90": float(np.nanpercentile(frac, 90)),
-        "under_1pct": float(np.nanmean(frac < 0.01)),
+        mask &= np.asarray(valid_mask)[rows, cols]
+    model_crop = np.asarray(model)[rows, cols]
+    frac, peak = _own_fraction(np.asarray(science_image)[rows, cols], model_crop, mask)
+    used = mask & np.isfinite(frac)
+    values = frac[used]
+    stats = {
+        "mean": float(np.mean(values)),
+        "median": float(np.median(values)),
+        "p90": float(np.percentile(values, 90)),
+        "under_1pct": float(np.mean(values < 0.01)),
     }
+    if noise is not None:
+        sigma = noise_sigma(noise, model_crop)[used]
+        threshold = 0.01 * np.broadcast_to(peak[:, None], mask.shape)[used]
+        stats["noise_ceiling"] = float(np.mean(erf(threshold / (np.sqrt(2) * sigma))))
+        stats["noise_limited"] = float(np.mean(threshold < NOISE_SIGMAS * sigma))
+    return stats
 
 
 def plot_fit_difference(
@@ -640,17 +850,31 @@ def plot_fit_difference(
     spaxel: int,
     output_path: Path,
     pad: int = 10,
+    centres: dict[int, tuple[int, np.ndarray]] | None = None,
+    noise: tuple[float, float, float] | None = None,
 ) -> Path:
-    """Plot the initial and best-fit models of one spaxel, and the difference between them.
+    """Plot one spaxel's initial and best-fit models, their residuals and the best fit's percentage error.
 
-    Columns: initial, best fit, difference (best fit - initial).
-    Top row: the model (difference column: model change). Bottom row: science - model for the first two columns;
-    in the difference column, |science - initial| - |science - best fit|, so positive means the fit improved.
-    Images are cropped to the spaxel's footprint; the first two columns in each row share a colour scale.
+    The bottom-right panel is 100 * (science - best fit) / row peak on a +-2% scale; with centres it uses each
+    row's own peak and shows only the spaxel's own pixels.
+
+    Args:
+        science_image: The image.
+        initial_model: Model before the fit.
+        final_model: Model after the fit.
+        spaxel: Spaxel index.
+        output_path: PNG to write.
+        pad: Rows shown beyond the spaxel's footprint.
+        centres: Output of trace_centres, for the own-pixel metric.
+        noise: Output of noise_model, for the noise ceiling in the title.
+
+    Returns:
+        Path: output_path.
     """
     a0, a1 = int(A0_PARAMS[spaxel]), int(A1_PARAMS[spaxel]) + 1
     b0, b1 = max(int(B0_PARAMS[spaxel]) - 50, 0), int(B1_PARAMS[spaxel]) + 51
-    rows, cols = slice(max(a0 - pad, 0), a1 + pad), slice(b0, b1)
+    height, width = np.shape(science_image)
+    rows, cols = slice(max(a0 - pad, 0), min(a1 + pad, height)), slice(b0, min(b1, width))
     extent = (cols.start, cols.stop, rows.start, rows.stop)
 
     science = np.asarray(science_image)[rows, cols]
@@ -658,12 +882,21 @@ def plot_fit_difference(
     final = np.asarray(final_model)[rows, cols]
     resid_initial, resid_final = science - initial, science - final
     model_change = final - initial
-    improvement = np.abs(resid_initial) - np.abs(resid_final)
+    if centres is None:
+        percent_error = 100 * resid_final / np.nanmax(science, axis=1, keepdims=True)
+        percent_label = "Best fit % error (of row peak)"
+    else:
+        own = _own_pixel_crop(spaxel, centres, rows, cols)
+        frac, _ = _own_fraction(science, final, own)
+        percent_error = 100 * np.sign(resid_final) * frac
+        percent_label = "Best fit % error (of own row peak, own pixels)"
+    percent_cmap = CMAP_DIFF.copy()
+    percent_cmap.set_bad("#d9d9d6")
 
     data_lo, data_hi = np.nanpercentile(np.stack([initial, final]), [1, 99])
     resid_lim = float(max(np.nanpercentile(np.abs(resid_initial), 99), np.nanpercentile(np.abs(resid_final), 99)))
     change_lim = max(float(np.nanpercentile(np.abs(model_change), 99.5)), 1e-9)
-    improve_lim = max(float(np.nanpercentile(np.abs(improvement), 99.5)), 1e-9)
+    percent_lim = 2.0
 
     panels = [
         # (row, col, data, label, cmap, vmin, vmax)
@@ -672,19 +905,27 @@ def plot_fit_difference(
         (0, 2, model_change, "Model diff (best fit - initial)", CMAP_DIFF, -change_lim, change_lim),
         (1, 0, resid_initial, "Science - initial", CMAP_DIFF, -resid_lim, resid_lim),
         (1, 1, resid_final, "Science - best fit", CMAP_DIFF, -resid_lim, resid_lim),
-        (1, 2, improvement, "Residual improvement", CMAP_DIFF, -improve_lim, improve_lim),
+        (1, 2, percent_error, percent_label, percent_cmap, -percent_lim, percent_lim),
     ]
     fig, axes = plt.subplots(2, 3, figsize=(13.5, 12), gridspec_kw={"hspace": 0.2, "wspace": 0.2})
     stats = {
-        name: residual_stats(science_image, model, spaxel)
+        name: residual_stats(science_image, model, spaxel, centres=centres, noise=noise)
         for name, model in (("initial", initial_model), ("best fit", final_model))
     }
     summary = "; ".join(
-        f"{name}: mean {s['mean']:.1%}, median {s['median']:.1%}, <1% {s['under_1pct']:.0%}" for name, s in stats.items()
+        f"{name}: mean {s['mean']:.1%}, median {s['median']:.1%}, <1% {s['under_1pct']:.0%}"
+        for name, s in stats.items()
     )
+    metric = "|resid|/row peak" if centres is None else "|resid|/own row peak, own pixels"
+    if "noise_ceiling" in stats["best fit"]:
+        s = stats["best fit"]
+        summary += (
+            f"\nnoise ceiling (perfect model) <1% {s['noise_ceiling']:.0%}; "
+            f"noise-limited pixels {s['noise_limited']:.0%}"
+        )
     axes[0, 0].annotate(
         f"Spaxel {spaxel} - initial vs best fit (columns {cols.start}-{cols.stop}, rows {rows.start}-{rows.stop})\n"
-        f"|resid|/row peak, {summary}",
+        f"{metric}, {summary}",
         xy=(0, 1.01),
         xycoords="axes fraction",
         ha="left",
