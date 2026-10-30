@@ -4,10 +4,33 @@ import matplotlib.colors as colors
 from astropy.io import fits
 from astropy.visualization import ZScaleInterval, AsinhStretch, ImageNormalize
 
+#CHANGE HERE TODO
+fits_file_name = "24_028_001_001_03_B"
+IS_CONTINUUM = False
 
-# FITS_FILE_1 = "C:/Users/gibis/URAP/snifs-pipeline/output/level=preprocessed/deep_skyflat_coadd.fits"
-FITS_FILE_1 = "./sky_deep_coadd_uncorrected.fits"
-FITS_FILE_2 = "C:/Users/gibis/URAP/snifs-pipeline/src/pipeline/tasks/processing/sky_deep_coadd_group_9_corrected.fits"
+#URDONE TODO
+
+savename = f"{fits_file_name}_reconstructed"
+if IS_CONTINUUM:
+    savename += "_cont.npy"
+else:
+    savename += "_arc.npy"
+
+downloads_dir = r"C:/Users/gibis/URAP/downloads from nersc"
+folder_dir = f"C:/Users/gibis/URAP/downloads from nersc/{fits_file_name}/spaxel_fits"
+fits_path = f"C:/Users/gibis/URAP/downloads from nersc/{fits_file_name}/{fits_file_name}.fits"
+
+
+
+savepath = f"C:/Users/gibis/URAP/downloads from nersc/{fits_file_name}/{savename}"
+
+newsavepath = f"C:/Users/gibis/URAP/downloads from nersc/{fits_file_name}/{fits_file_name}_reconstructed"
+if IS_CONTINUUM:
+    newsavepath += "_cont.fits"
+else:
+    newsavepath += "_arc.fits"
+FITS_FILE_1 = fits_path
+FITS_FILE_2 = newsavepath
 
 
 def get_user_inputs():
@@ -29,12 +52,25 @@ def get_user_inputs():
 def main():
     scale_choice, use_zscale = get_user_inputs()
 
-
+    print("COMPARING:")
+    print(FITS_FILE_1)
+    print("to")
+    print(FITS_FILE_2)
     data1 = fits.getdata(FITS_FILE_1)
     data2 = fits.getdata(FITS_FILE_2)
 
+    DETECTOR_SHAPE = (4096,2048)
+    if data1.shape != DETECTOR_SHAPE:
+        data1 = data1.T
+        if data1.shape != DETECTOR_SHAPE:
+            raise ValueError(f"FITS shape {data1.shape} != {DETECTOR_SHAPE}")
 
+    if data2.shape != DETECTOR_SHAPE:
+        data2 = data2.T
+        if data2.shape != DETECTOR_SHAPE:
+            raise ValueError(f"FITS shape {data2.shape} != {DETECTOR_SHAPE}")
 
+        
     diff_data = data1 - data2
     # print(diff_data.shape)
     crop_choice = input("Apply Crop? (Y/N) [default: N]: ").strip().upper()
