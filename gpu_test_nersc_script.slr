@@ -100,7 +100,7 @@ nvidia-cuda-mps-control -d
 
 #CHANGE HERE
 GROUP_NUM=9 #0-14
-FITS_PATH="/global/homes/a/anousha/deep_skyflat_coadd.fits" #ADDPATH
+FITS_PATH="global/homes/a/alexh/snifs-pipeline/deep_skyflat_coadd.fits" #ADDPATH
 
 
 #WARMUP FOR BUILDING CAHCE
@@ -108,6 +108,7 @@ FITS_PATH="/global/homes/a/anousha/deep_skyflat_coadd.fits" #ADDPATH
 echo "Building CuPy kernel cache"
 uv run --no-sync python src/pipeline/tasks/processing/build_forward_group.py
 
+sleep 20
 
 # ==============================================================================
 # EXECUTION

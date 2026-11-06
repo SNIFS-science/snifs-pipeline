@@ -896,7 +896,7 @@ def fit_forward_model(n_cpu_workers: int, n_gpu_workers: int, sched_address: str
                 # sol_futs = [_submit(solve_perturbation_task, cpu_addrs, "CPU", payload_fut, p) for p in range(n_pert)]
                 sol_futs = []
                 for p in range(n_pert):
-                    if p % 2 == 2:
+                    if (p % 2 == 0) or ((not is_offset) and p == 5):
                         # every other task (index 1, 3, 5) goes to the GPU since there is a 16 to 32 worker ratio and GPUs are ~twice as fast
                         fut = _submit(solve_perturbation_gpu_task, gpu_addrs, "GPU", payload_fut, p)
                     else:

@@ -455,7 +455,8 @@ def build_target_matrix(
 
 
 if __name__ == "__main__":
-    t = build_neighbor_matrix(0, [0, 0, 0, 0, 0], [0, 0, 0, 0, 0], 1)
-    t = build_target_matrix(0, [0, 0, 0, 0, 0], [0, 0, 0, 0, 0], [0, 0, 0, 0, 0])
+    off_poly = np.zeros((15,5), dtype=np.float64, order='C')
+    wid_poly = np.zeros((15,5), dtype=np.float64, order='C')
+    wid_poly[:,0] = 1
+    t = build_neighbor_matrix(target_spaxel=0, offsets=off_poly, widths=wid_poly, oversample_factor=1)
     del t
-    

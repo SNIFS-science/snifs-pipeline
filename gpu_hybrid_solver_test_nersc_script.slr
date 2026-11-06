@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=snifs_test_group9
+#SBATCH --job-name=snifs_hybrid_solve_group_9
 #SBATCH --time=00:25:00                     # cpu portion ~5.7 min/iter + up to 10 min GPU worker startup (first-run kernel compile)
 #SBATCH -A m112 
 #SBATCH -C "gpu&hbm80g"                # Request Perlmutter 80GB A100 GPU nodes
@@ -36,7 +36,7 @@ export WORKER_WAIT_TIMEOUT=600
 
 
 
-OUTPUT_DIR="$SCRATCH/snifs-pipeline/output/make_matrix_GPU_hybrid_solver_test"
+OUTPUT_DIR="$SCRATCH/snifs-pipeline/output/make_matrix_GPU_hybrid_solver_test_3"
 mkdir -p "$OUTPUT_DIR"
 
 
@@ -80,7 +80,7 @@ export MODEL_GPU_MEM="16GiB"             # Per-task VRAM allocation (4 workers p
 
 # To saturate 56 CPU cores, we need ~10-15 GPU matrices waiting in the queue.
 # 12 inflight matrices * 5.5 perturbations = ~66 CPU tasks ready to go.
-export MODEL_INFLIGHT=12
+export MODEL_INFLIGHT=15
 
 # Threading control irrelevant not using pypardiso right now
 # export OMP_NUM_THREADS=1
@@ -98,13 +98,13 @@ nvidia-cuda-mps-control -d
 
 #CHANGE HERE
 GROUP_NUM=9 #0-14
-FITS_PATH="/global/homes/a/anousha/deep_skyflat_coadd.fits" #ADDPATH
+FITS_PATH="/global/homes/a/alexh/snifs-pipeline/deep_skyflat_coadd.fits" #ADDPATH
 
 #WARMUP FOR BUILDING CAHCE
 
-echo "Building CuPy kernel cache"
-uv run --no-sync python src/pipeline/tasks/processing/build_forward_group.py
-
+# echo "Building CuPy kernel cache"
+# uv run --no-sync python src/pipeline/tasks/processing/build_forward_group.py
+# sleep 5
 
 
 # ==============================================================================
@@ -112,7 +112,7 @@ uv run --no-sync python src/pipeline/tasks/processing/build_forward_group.py
 # ==============================================================================
 echo "Forward Modeling group ${GROUP_NUM} on Perlmutter GPU Node"
 
-srun --gpu-bind=none uv run --no-sync python src/pipeline/tasks/processing/NERSC_test_run_one_group.py \
+srun --gpu-bind=none uv run --no-sync python src/pipeline/tasks/processing/NERSC_hybrid_one_group_test.py \
     --group "$GROUP_NUM" \
     --output-dir "$OUTPUT_DIR" \
     --fits-path "$FITS_PATH"
